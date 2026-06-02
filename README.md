@@ -61,6 +61,15 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 | **Sales** | Contracts | `ContractsView` + `GET /api/v1/contracts` |
 | **Sales** | Quote / Lead / Opportunity Forecast | `ForecastView` tabs |
 | **Workspaces** | Default Workspace | `Workspace` entity, all records scoped |
+| **Activities** | Follow-up Notes / Add Note | `ActivityNote` entity + notes timeline (Phase 11) |
+| **Activities** | 11 Activity Types | `EMAIL, SALES_VISIT, MAILING, SMS, ABSENCE` added (Phase 11) |
+| **Products** | Product Catalog / Price List | `Product` entity + `ProductsView` (Phase 12) |
+| **Admin** | Managing Users | `UsersView` (admin only) + `UserController` (Phase 13) |
+| **Data** | Import / Export | CSV import (Contacts, Accounts) + CSV export all grids (Phase 14) |
+| **Notify** | Subscribe / Notify Alerts | `Notification` entity + bell in header (Phase 15) |
+| **Documents** | File Attachments | `Attachment` entity, upload on Account/Contact/Activity (Phase 16) |
+| **Calendar** | Meeting / Task Calendar | `CalendarView` month grid + iCalendar export (Phase 17) |
+| **Email** | E-Mail Services | Spring Mail + EMAIL activity type (Phase 18) |
 
 ---
 
@@ -1414,6 +1423,635 @@ Add `SavedSearchesView` (`@Route("saved-searches")`):
 
 ---
 
+### Phase 11 — Activity Notes & Follow-ups
+
+OpenCRX tracks every state change and note on an activity as a timestamped follow-up entry. Adds `ActivityNote` entity, timeline UI inside the activity row, and proper status-transition actions (Assign → In Progress, Complete, Reopen, Close).
+
+#### BE Step 11.1 — ActivityNote Entity
+
+**`domain/entity/ActivityNote.java`**
+```
+@Entity @Table("activity_notes")
+Fields:
+  Long id
+  @Column(columnDefinition="TEXT", nullable=false) String text
+  @ManyToOne(fetch=LAZY) @JoinColumn("activity_id") Activity activity
+  @ManyToOne(fetch=LAZY) @JoinColumn("author_id") User author
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+```
+
+Add to **`Activity.java`**:
+```java
+@OneToMany(mappedBy="activity", cascade=ALL, fetch=LAZY, orphanRemoval=true)
+@OrderBy("createdAt ASC")
+List<ActivityNote> notes = new ArrayList<>();
+```
+
+#### BE Step 11.2 — Expand ActivityType enum
+
+Add to `ActivityType.java`: `EMAIL, SALES_VISIT, MAILING, SMS, ABSENCE`
+(keeps backward-compatible — existing BUG/FEATURE/TASK/MEETING/CALL values unchanged)
+
+#### BE Step 11.3 — Repository
+
+```java
+// ActivityNoteRepository extends JpaRepository<ActivityNote, Long>
+// findByActivity_IdOrderByCreatedAtAsc(Long activityId)
+```
+
+#### BE Step 11.4 — DTOs
+
+**`ActivityNoteRequest`** record: `@NotBlank String text`
+
+**`ActivityNoteResponse`** record: `Long id`, `String text`, `String authorName`, `LocalDateTime createdAt`
+— `from(ActivityNote n)`: map all fields
+
+Update **`ActivityResponse`** to add: `List<ActivityNoteResponse> notes`
+
+#### BE Step 11.5 — Service updates
+
+Add to **`ActivityService`**:
+- `ActivityNoteResponse addNote(Long activityId, ActivityNoteRequest, String authorUsername)`
+- `void deleteNote(Long noteId)`
+- `ActivityResponse assign(Long activityId, String assignedToUsername)` — sets `status = IN_PROGRESS`
+- `ActivityResponse reopen(Long activityId)` — sets `status = IN_PROGRESS`, clears `resolvedAt`
+
+#### BE Step 11.6 — Controller updates
+
+Add to **`ActivityController`**:
+```
+POST   /{id}/notes          → addNote (returns ActivityNoteResponse)
+DELETE /{id}/notes/{noteId} → deleteNote (204)
+PATCH  /{id}/assign         → assign (?username=)
+PATCH  /{id}/reopen         → reopen
+```
+
+#### FE Step 11.7 — Activity detail panel
+
+In **`ActivitiesView`**, add a detail row expansion (or side panel) per activity:
+- Show notes timeline: each note as a card with author, timestamp, text
+- "Add Note" text area + Submit button at the bottom
+- Transition buttons: Assign (shows only if NEW), Reopen (shows only if RESOLVED/CLOSED)
+
+#### Verification Phase 11
+
+1. Create a MEETING activity
+2. Add a note — confirm note appears in timeline with timestamp
+3. Click Assign — confirm status changes to IN_PROGRESS and a system note is added
+4. Click Resolve then Reopen — confirm status goes back to IN_PROGRESS
+
+---
+
+### Phase 12 — Product Catalog
+
+OpenCRX has a full product/price list model. Adding a product catalog lets users select products when building quote and sales-order line items instead of typing free-text product names.
+
+#### BE Step 12.1 — Enums
+
+**`ProductCategory.java`** — `SOFTWARE, HARDWARE, SERVICE, SUBSCRIPTION, CONSULTING, OTHER`
+
+#### BE Step 12.2 — Product Entity
+
+**`domain/entity/Product.java`**
+```
+@Entity @Table("products")
+Fields:
+  Long id
+  @Column(nullable=false, unique=true) String sku
+  @Column(nullable=false) String name
+  @Column(columnDefinition="TEXT") String description
+  @Enumerated(EnumType.STRING) ProductCategory category
+  @Column(precision=15, scale=2, nullable=false) BigDecimal unitPrice
+  @Column(length=3) String currency = "USD"
+  boolean active = true
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+  @LastModifiedDate LocalDateTime updatedAt
+```
+
+#### BE Step 12.3 — Repository
+
+```java
+// ProductRepository extends JpaRepository<Product, Long>
+// Page<Product> findByNameContainingIgnoreCaseAndActive(String name, boolean active, Pageable pageable)
+// long countByNameContainingIgnoreCaseAndActive(String name, boolean active)
+// Optional<Product> findBySku(String sku)
+```
+
+#### BE Step 12.4 — DTOs
+
+**`ProductRequest`** record: `@NotBlank String sku`, `@NotBlank String name`, `String description`, `ProductCategory category`, `@NotNull BigDecimal unitPrice`, `String currency`
+
+**`ProductResponse`** record: `Long id`, `String sku`, `String name`, `String description`, `ProductCategory category`, `BigDecimal unitPrice`, `String currency`, `boolean active`
+— `from(Product p)`
+
+#### BE Step 12.5 — Service
+
+**`ProductService`** `@Service @Transactional`:
+- `ProductResponse create(ProductRequest)`
+- `ProductResponse findById(Long)` `@Transactional(readOnly=true)`
+- `Page<ProductResponse> findAll(Pageable, String search)` `@Transactional(readOnly=true)`
+- `long count(String search)` `@Transactional(readOnly=true)`
+- `ProductResponse update(Long, ProductRequest)`
+- `ProductResponse toggleActive(Long)`
+- `void delete(Long)`
+
+#### BE Step 12.6 — Controller
+
+**`ProductController`** `@RestController @RequestMapping("/api/v1/products")`:
+```
+POST   /              → create
+GET    /              → list (?search=)
+GET    /{id}          → findById
+PUT    /{id}          → update
+PATCH  /{id}/toggle   → toggleActive
+DELETE /{id}          → delete (204)
+```
+
+#### FE Step 12.7 — ProductsView
+
+**`ui/ProductsView.java`**
+```
+@Route("products") @PageTitle("Products | CRM") @PermitAll
+extends VerticalLayout
+Grid<ProductResponse> grid = new Grid<>(ProductResponse.class, false)
+Columns: sku, name, category, unitPrice (formatted), currency, active (badge), Actions
+Toolbar:
+  TextField searchField (ValueChangeMode.LAZY)
+  "New Product" Button (LUMO_PRIMARY)
+Action buttons: Edit, Toggle Active (green/grey), Delete
+Dialog fields: TextField sku, name; TextArea description;
+               ComboBox<ProductCategory> category;
+               NumberField unitPrice; TextField currency
+```
+
+#### FE Step 12.8 — Wire products into line-item dialogs
+
+In **`QuotesView`** and **`SalesOrdersView`** line-item dialogs:
+- Replace free-text `product_name` TextField with a `ComboBox<ProductResponse>` backed by `productService.findAll()`
+- On selection, auto-fill `unitPrice` from the chosen product
+- Still allow manual override of unit price
+
+#### FE Step 12.9 — Navigation
+
+Add Products under Sales in `MainLayout.createDrawer()`:
+```java
+sales.addItem(new SideNavItem("Products", ProductsView.class, VaadinIcon.CART.create()));
+```
+
+#### Verification Phase 12
+
+1. Create 3 products with different SKUs and prices
+2. Open a Quote → add line item → confirm product ComboBox appears and auto-fills price
+3. Disable a product → confirm it no longer appears in the ComboBox (filter `active=true`)
+4. Check `GET /api/v1/products` in Swagger
+
+---
+
+### Phase 13 — User Management UI (Admin)
+
+OpenCRX's "Managing Users" guide covers creating principals, assigning groups, and disabling segment access. Adds an admin-only Users view to manage CRM users and their roles.
+
+#### BE Step 13.1 — User DTOs
+
+**`UserRequest`** record: `@NotBlank String username`, `@Email String email`, `String password`, `Set<String> roles`
+
+**`UserResponse`** record: `Long id`, `String username`, `String email`, `Set<String> roles`, `boolean enabled`, `LocalDateTime createdAt`
+— `from(User u)`: map all fields
+
+#### BE Step 13.2 — UserService additions
+
+Add to **`UserService`** (or create **`UserManagementService`**):
+- `Page<UserResponse> findAll(Pageable, String search)` `@Transactional(readOnly=true)`
+- `long count(String search)` `@Transactional(readOnly=true)`
+- `UserResponse create(UserRequest)` — encode password with `PasswordEncoder`
+- `UserResponse update(Long id, UserRequest)` — update email/roles; only re-encode password if non-blank
+- `UserResponse toggleEnabled(Long id)` — flip `enabled` flag
+- `void delete(Long id)` — prevent deleting last admin
+
+#### BE Step 13.3 — UserController
+
+**`UserController`** `@RestController @RequestMapping("/api/v1/users") @PreAuthorize("hasRole('ADMIN')")`:
+```
+GET    /              → list (paginated, ?search=)
+GET    /{id}          → findById
+POST   /              → create
+PUT    /{id}          → update
+PATCH  /{id}/toggle   → toggleEnabled
+DELETE /{id}          → delete (204)
+```
+
+#### FE Step 13.4 — UsersView
+
+**`ui/UsersView.java`**
+```
+@Route("users") @PageTitle("Users | CRM") @RolesAllowed("ADMIN")
+extends VerticalLayout
+Grid<UserResponse> grid = new Grid<>(UserResponse.class, false)
+Columns: username, email, roles (badges), enabled (badge), createdAt, Actions
+Toolbar: TextField searchField + "New User" Button
+Action buttons: Edit, Toggle Active, Delete (disabled for self)
+Dialog fields: TextField username, email, password (hint: leave blank to keep current);
+               CheckboxGroup<String> roles (choices: ROLE_USER, ROLE_ADMIN, ROLE_SALES, ROLE_SUPPORT)
+```
+
+#### FE Step 13.5 — Navigation
+
+Add Users under Settings in `MainLayout.createDrawer()` (admin-only, check role):
+```java
+SecurityService sec = // injected
+if (sec.hasRole("ADMIN")) {
+    settings.addItem(new SideNavItem("Users", UsersView.class, VaadinIcon.USERS.create()));
+}
+```
+
+#### Verification Phase 13
+
+1. Log in as admin → navigate Settings → Users
+2. Create a new user with `ROLE_SALES`
+3. Disable the user — confirm they cannot log in (enabled=false)
+4. Re-enable the user
+5. Verify `GET /api/v1/users` returns 401 without admin JWT
+
+---
+
+### Phase 14 — Data Import / Export
+
+OpenCRX supports Excel/CSV import for Contacts and Accounts, and export of any grid. Adds CSV import for bulk data loading and a "Download CSV" button on every grid.
+
+#### BE Step 14.1 — CSV Export utility
+
+**`util/CsvExporter.java`** — generic utility:
+```java
+// Writes List<T> to a CSV InputStream using reflection on getter methods
+// Columns are derived from the record component names
+public static <T extends Record> InputStream export(List<T> rows, Class<T> type)
+```
+
+Add to each service a `List<XxxResponse> findAllForExport(filters...)` that fetches all (no page limit) for the export case.
+
+#### BE Step 14.2 — Export endpoints
+
+Add to **`AccountController`**, **`ContactController`**, **`LeadController`**, **`OpportunityController`**, **`ActivityController`**:
+```
+GET /api/v1/{resource}/export?format=csv  → streams CSV file (Content-Disposition: attachment)
+```
+
+Use `StreamingResponseBody` or `ResponseEntity<Resource>` to stream the CSV.
+
+#### BE Step 14.3 — CSV Import endpoint (Contacts)
+
+Add to **`ContactController`**:
+```
+POST /api/v1/contacts/import  → multipart/form-data with CSV file
+```
+
+CSV columns: `first_name, last_name, email, phone, job_title, department`
+
+**`ContactImportService`**:
+- Parse CSV with `java.io.BufferedReader` (no extra deps)
+- Skip header row, skip blank lines
+- Call `contactService.create()` per row
+- Return `ImportResultResponse` record: `int imported`, `int skipped`, `List<String> errors`
+
+Add same `POST /api/v1/accounts/import` for Accounts:
+CSV columns: `name, industry, website, phone, email, type`
+
+#### FE Step 14.4 — Export button on grid views
+
+In every grid view toolbar, add an "Export CSV" button (VaadinIcon.DOWNLOAD):
+```java
+Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+exportBtn.addClickListener(e -> {
+    StreamResource resource = new StreamResource("export.csv",
+        () -> getUI().map(ui -> /* call /api/v1/{resource}/export */).orElse(null));
+    Anchor download = new Anchor(resource, "");
+    download.getElement().setAttribute("download", true);
+    download.getElement().executeJs("this.click()");
+    add(download); // temporary, remove after click
+});
+```
+
+#### FE Step 14.5 — Import dialog (Contacts + Accounts views)
+
+Add "Import CSV" button to `ContactsView` and `AccountsView` toolbar:
+- Opens a dialog with an `Upload` component (Vaadin's built-in)
+- On file received, POST to `/api/v1/contacts/import` using `RestTemplate` / `HttpClient`
+- Show result: "Imported 42 contacts, 3 skipped" notification
+
+#### Verification Phase 14
+
+1. Export Contacts grid → verify CSV downloads with correct columns
+2. Create a CSV with 5 contacts → import → verify they appear in the grid
+3. Import a CSV with a duplicate email → verify that row is skipped and reported in errors
+4. Test export with active filters (e.g., only WON leads)
+
+---
+
+### Phase 15 — In-App Notifications
+
+OpenCRX's Subscribe/Notify system creates alerts when subscribed entities change. Adds a `Notification` entity, a notification bell in the header, and background event triggers on key CRM actions.
+
+#### BE Step 15.1 — Notification Entity
+
+**`domain/entity/Notification.java`**
+```
+@Entity @Table("notifications")
+Fields:
+  Long id
+  @ManyToOne(fetch=LAZY) @JoinColumn("user_id") User user
+  @Column(nullable=false) String message
+  String entityType   // "LEAD", "ACTIVITY", "OPPORTUNITY", etc.
+  Long entityId
+  boolean read = false
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+```
+
+#### BE Step 15.2 — Repository
+
+```java
+// NotificationRepository extends JpaRepository<Notification, Long>
+// List<Notification> findByUser_IdAndReadFalseOrderByCreatedAtDesc(Long userId)
+// long countByUser_IdAndReadFalse(Long userId)
+// Page<Notification> findByUser_IdOrderByCreatedAtDesc(Long userId, Pageable pageable)
+```
+
+#### BE Step 15.3 — NotificationService
+
+**`NotificationService`** `@Service @Transactional`:
+- `void notify(Long userId, String message, String entityType, Long entityId)` — creates a Notification row
+- `List<NotificationResponse> getUnread(String username)`
+- `long countUnread(String username)`
+- `void markRead(Long notificationId)`
+- `void markAllRead(String username)`
+
+#### BE Step 15.4 — Wire notifications to CRM events
+
+Inject `NotificationService` into:
+- **`LeadService.create()`** — notify the `assignedTo` user: "New lead assigned: {title}"
+- **`ActivityService.create()`** — notify the `assignedTo` user: "New activity assigned: {title}"
+- **`OpportunityService.update()`** — when `stage` changes to `WON`, notify `assignedTo`: "Opportunity WON: {name}"
+- **`ActivityService.resolve()`** — notify `createdBy`: "Activity resolved: {title}"
+
+#### BE Step 15.5 — NotificationController
+
+**`NotificationController`** `@RestController @RequestMapping("/api/v1/notifications")`:
+```
+GET    /          → getUnread (current user from SecurityContext)
+GET    /count     → countUnread (returns Long)
+PATCH  /{id}/read → markRead
+PATCH  /read-all  → markAllRead
+```
+
+#### FE Step 15.6 — Notification bell in header
+
+In **`MainLayout.createHeader()`**:
+- Add a `Button` with `VaadinIcon.BELL` and a `Badge` showing unread count
+- On click, open a `Dialog` listing unread notifications (message, entity type, time ago)
+- Each notification has a "Mark read" button
+- "Mark all read" button at the top of the dialog
+- Poll for new count every 60 s using `UI.getCurrent().addPollListener()` (set `ui.setPollInterval(60000)`)
+
+#### Verification Phase 15
+
+1. Create a lead assigned to admin — check bell shows badge with count 1
+2. Open notification panel — confirm lead notification appears
+3. Mark as read — badge disappears
+4. Win an opportunity — confirm notification appears for the assigned user
+
+---
+
+### Phase 16 — Documents & Attachments
+
+OpenCRX supports attaching documents to any CRM object. Adds a generic `Attachment` entity that can be linked to an Account, Contact, Activity, Lead, Opportunity, or Contract.
+
+#### BE Step 16.1 — Attachment Entity
+
+**`domain/entity/Attachment.java`**
+```
+@Entity @Table("attachments")
+Fields:
+  Long id
+  @Column(nullable=false) String filename
+  @Column(nullable=false) String contentType
+  long fileSize
+  @Lob @Column(columnDefinition="BYTEA") byte[] data
+  String entityType    // "ACCOUNT", "CONTACT", "ACTIVITY", "LEAD", "OPPORTUNITY", "CONTRACT"
+  Long entityId
+  @ManyToOne(fetch=LAZY) @JoinColumn("uploaded_by_id") User uploadedBy
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+```
+
+> PostgreSQL: `BYTEA` stores binary data efficiently. Max upload size configured via `spring.servlet.multipart.max-file-size=10MB`.
+
+#### BE Step 16.2 — Repository
+
+```java
+// AttachmentRepository extends JpaRepository<Attachment, Long>
+// List<Attachment> findByEntityTypeAndEntityId(String entityType, Long entityId)
+```
+
+#### BE Step 16.3 — Service
+
+**`AttachmentService`** `@Service @Transactional`:
+- `AttachmentResponse upload(MultipartFile file, String entityType, Long entityId, String uploadedByUsername)`
+- `List<AttachmentResponse> findByEntity(String entityType, Long entityId)` `@Transactional(readOnly=true)`
+- `byte[] download(Long id)` `@Transactional(readOnly=true)` — returns raw bytes
+- `void delete(Long id)`
+
+**`AttachmentResponse`** record: `Long id`, `String filename`, `String contentType`, `long fileSize`, `String uploadedByName`, `LocalDateTime createdAt`
+
+#### BE Step 16.4 — Controller
+
+**`AttachmentController`** `@RestController @RequestMapping("/api/v1/attachments")`:
+```
+POST   /upload?entityType=ACCOUNT&entityId=1  → multipart upload
+GET    /entity?entityType=ACCOUNT&entityId=1  → list attachments
+GET    /{id}/download                          → stream file (Content-Disposition: attachment)
+DELETE /{id}                                   → delete (204)
+```
+
+#### FE Step 16.5 — Attachment panel in detail views
+
+In **`AccountsView`**, **`ContactsView`**, **`ActivitiesView`** detail sections:
+- Add an "Attachments" `Accordion` section at the bottom of the edit dialog
+- List existing attachments with download links
+- Vaadin `Upload` component for adding new files (max 10 MB)
+- On upload success, refresh the attachment list
+
+#### Verification Phase 16
+
+1. Open an Account → attach a PDF file
+2. Verify it appears in the attachments list with correct filename and size
+3. Click download → confirm the file streams correctly
+4. Delete the attachment → confirm it disappears
+5. Verify `GET /api/v1/attachments/entity?entityType=ACCOUNT&entityId=1` returns the attachment metadata
+
+---
+
+### Phase 17 — Calendar View for Activities
+
+OpenCRX has a calendar-based view for Meeting, Sales Visit, and Task activities. Adds a monthly calendar grid showing scheduled activities, with click-to-create for any date.
+
+#### BE Step 17.1 — Calendar query endpoint
+
+Add to **`ActivityController`**:
+```
+GET /api/v1/activities/calendar?from=2024-01-01&to=2024-01-31
+```
+
+Returns `List<ActivityResponse>` filtered by `dueDate` between `from` and `to`, types `MEETING, TASK, SALES_VISIT` only, sorted by `dueDate`.
+
+Add to **`ActivityRepository`**:
+```java
+List<Activity> findByDueDateBetweenAndTypeIn(LocalDate from, LocalDate to, List<ActivityType> types);
+```
+
+#### BE Step 17.2 — iCalendar export
+
+Add to **`ActivityController`**:
+```
+GET /api/v1/activities/ical  → produces text/calendar (RFC 5545)
+```
+
+Generates a `.ics` file for all `MEETING`, `TASK`, `SALES_VISIT` activities due in the next 90 days using manual string building (no extra deps):
+```
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20240115T090000Z
+SUMMARY:Meeting with Acme Corp
+DESCRIPTION:...
+END:VEVENT
+...
+END:VCALENDAR
+```
+
+#### FE Step 17.3 — CalendarView
+
+**`ui/CalendarView.java`**
+```
+@Route("calendar") @PageTitle("Calendar | CRM") @PermitAll
+extends VerticalLayout
+
+State:
+  private YearMonth currentMonth = YearMonth.now()
+
+Layout:
+  HorizontalLayout nav bar:
+    Button "< Prev" → currentMonth = currentMonth.minusMonths(1); refreshCalendar()
+    H3 showing "June 2024"
+    Button "Next >" → currentMonth = currentMonth.plusMonths(1); refreshCalendar()
+    Button "Download .ics" (VaadinIcon.CALENDAR)
+
+  GridLayout (7 columns, N rows) for the calendar grid:
+    - Header row: Mon Tue Wed Thu Fri Sat Sun
+    - Each day cell: date number + list of activity chips (title, color by type)
+    - Empty cells for days before month start
+
+Activity chips:
+  MEETING = blue, TASK = orange, SALES_VISIT = green
+  Click chip → opens read-only activity detail dialog
+  Click empty day → opens "New Activity" dialog with dueDate pre-filled
+```
+
+#### FE Step 17.4 — Navigation
+
+Add Calendar under Support in `MainLayout.createDrawer()`:
+```java
+support.addItem(new SideNavItem("Calendar", CalendarView.class, VaadinIcon.CALENDAR.create()));
+```
+
+#### Verification Phase 17
+
+1. Create 3 MEETING activities with due dates in the current month
+2. Open Calendar — verify the meetings appear on the correct days
+3. Click "< Prev" — confirm the month changes and activities for previous month show
+4. Click an empty date — confirm "New Activity" dialog opens with that date pre-filled
+5. Download .ics — open in calendar app and verify events appear
+
+---
+
+### Phase 18 — Email Activity & Spring Mail Integration
+
+OpenCRX has full email service configuration. Adds email sending capability when an EMAIL-type Activity is created or a Lead/Opportunity is assigned, using Spring Mail with SMTP.
+
+#### BE Step 18.1 — Spring Mail dependency
+
+Add to **`pom.xml`**:
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
+```
+
+#### BE Step 18.2 — Mail configuration
+
+Add to **`application-postgres.properties`**:
+```properties
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=${MAIL_USERNAME:}
+spring.mail.password=${MAIL_PASSWORD:}
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+app.mail.enabled=${MAIL_ENABLED:false}
+```
+
+Mail is disabled by default (`MAIL_ENABLED=false`). Set env vars to enable it in production.
+
+#### BE Step 18.3 — EmailService
+
+**`service/EmailService.java`** `@Service`:
+```java
+@Value("${app.mail.enabled:false}") private boolean mailEnabled;
+
+public void sendActivityAssigned(String toEmail, String activityTitle, String assignedByName) {
+    if (!mailEnabled) return;
+    SimpleMailMessage msg = new SimpleMailMessage();
+    msg.setTo(toEmail);
+    msg.setSubject("CRM: Activity assigned to you — " + activityTitle);
+    msg.setText("Hello,\n\nYou have been assigned a new activity: " + activityTitle +
+                "\nAssigned by: " + assignedByName + "\n\nLog in to view it.");
+    mailSender.send(msg);
+}
+
+public void sendLeadAssigned(String toEmail, String leadTitle, String assignedByName) { ... }
+public void sendOpportunityWon(String toEmail, String opportunityName) { ... }
+```
+
+#### BE Step 18.4 — Wire email sends
+
+Inject `EmailService` into:
+- **`ActivityService.create()`** — if `assignedTo` has an email, call `sendActivityAssigned`
+- **`LeadService.create()`** — call `sendLeadAssigned` if assignee has email
+- **`OpportunityService.update()`** — when stage becomes `WON`, call `sendOpportunityWon`
+
+All sends are fire-and-forget wrapped in `try/catch(MailException e)` — mail failures never break the main transaction.
+
+#### BE Step 18.5 — Email Activity type handling
+
+When `ActivityService.create()` receives `type = EMAIL`:
+- Require `contact_id` or `account_id` to be set (validate in service — throw `IllegalArgumentException` if both null)
+- Store email subject in `title`, email body in `description`
+- If `mailEnabled`, send the email immediately to the linked contact's email address
+
+#### FE Step 18.6 — Email composition dialog
+
+In **`ActivitiesView`**, when the type `ComboBox` value is `EMAIL`:
+- Show extra fields: `TextField subject` (maps to `title`), `TextArea body` (maps to `description`)
+- `ComboBox<ContactResponse> to` (required — maps to `contact`)
+- On save, show "Email sent" notification if `mailEnabled`, or "Email activity saved (mail disabled)" otherwise
+
+#### Verification Phase 18
+
+1. Set `MAIL_ENABLED=false` (default) — create an EMAIL activity → confirm it saves without errors
+2. Create a Lead assigned to admin — confirm no mail error even with mail disabled
+3. To test real mail: set `MAIL_USERNAME` + `MAIL_PASSWORD` env vars with a Gmail app password, set `MAIL_ENABLED=true`
+4. Create an EMAIL activity to a contact with a real email — verify the email arrives
+
+---
+
 ## 10. Running the Application
 
 ### Prerequisites
@@ -1676,3 +2314,12 @@ Seeded on first boot by `DataInitializer`:
 | Sales → Contracts | `/contracts` | 7 ✅ |
 | Sales → Forecast | `/forecast` | 8 ✅ |
 | Workspaces → Default | `/workspaces` | 9 ✅ |
+| Activity → Follow-up Notes | activity notes timeline | 11 |
+| Activity → 11 Types | EMAIL, SALES_VISIT, MAILING, SMS, ABSENCE added | 11 |
+| Products / Price List | `/products` | 12 |
+| Admin → Managing Users | `/users` (admin only) | 13 |
+| Data Import/Export | CSV import/export on grid views | 14 |
+| Subscribe/Notify → Alerts | notification bell + `/notifications` | 15 |
+| Documents / Attachments | file upload on any entity | 16 |
+| Calendar / Meetings | `/calendar` (month grid + .ics export) | 17 |
+| E-Mail Services | Spring Mail + EMAIL activity type | 18 |
