@@ -1422,6 +1422,7 @@ Add `SavedSearchesView` (`@Route("saved-searches")`):
 |---|---|---|
 | Java (JDK) | 17 | Set `JAVA_HOME` to your JDK directory |
 | Maven | via wrapper | No separate install needed — `mvnw.cmd` is included |
+| Docker | any recent | Required for the PostgreSQL container (default profile) |
 
 **Set JAVA_HOME before any Maven command (PowerShell):**
 ```powershell
@@ -1435,13 +1436,51 @@ Get-ChildItem "C:\Program Files\Java" | Select-Object Name
 
 ---
 
-### Development — H2 In-Memory (Windows / PowerShell)
+### Step 1 — Start the PostgreSQL Docker container
+
+The app uses PostgreSQL by default (profile `postgres`). A dedicated Docker container is required.
+
+**First-time setup — create and start the container:**
+```powershell
+docker run -d `
+  --name crm-postgres `
+  -e POSTGRES_DB=crmdb `
+  -e POSTGRES_USER=crm `
+  -e POSTGRES_PASSWORD=crm123 `
+  -p 5433:5432 `
+  postgres:14.4
+```
+
+**After every machine restart — just start the existing container:**
+```powershell
+docker start crm-postgres
+```
+
+**Verify it is running:**
+```powershell
+docker ps --filter name=crm-postgres
+```
+
+| Setting | Value |
+|---|---|
+| Host | `localhost` |
+| Port | `5433` |
+| Database | `crmdb` |
+| Username | `crm` |
+| Password | `crm123` |
+
+Hibernate creates all 18 tables automatically on first startup (`ddl-auto=update`). Data persists across app restarts.
+
+---
+
+### Step 2 — Run the application (Windows / PowerShell)
 
 The Maven wrapper must be invoked via Java directly on Windows due to a PATH quirk with `mvnw.cmd`:
 
 ```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17.0.5"
 $java = "$env:JAVA_HOME\bin\java.exe"
-$jar  = ".\mvn\wrapper\maven-wrapper.jar"
+$jar  = ".\.mvn\wrapper\maven-wrapper.jar"
 
 & $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
     "-Dmaven.multiModuleProjectDirectory=$PWD" `
@@ -1454,7 +1493,6 @@ Once started (takes ~30–60 s on first run while Vaadin downloads front-end res
 |---|---|
 | http://localhost:9080 | Main UI — log in as `admin` / `admin123` |
 | http://localhost:9080/swagger-ui.html | REST API docs |
-| http://localhost:9080/h2-console | H2 browser (`jdbc:h2:mem:crmdb`) |
 
 > **Shortcut** — if you have `mvn` on your PATH (standalone Maven install):
 > ```powershell
@@ -1463,19 +1501,33 @@ Once started (takes ~30–60 s on first run while Vaadin downloads front-end res
 
 ---
 
-### Development — Linux / macOS / WSL
+### Run the application (Linux / macOS / WSL)
 
 ```bash
+docker start crm-postgres          # ensure the container is running
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk   # adjust to your path
 ./mvnw spring-boot:run
 ```
 
 ---
 
-### Production — PostgreSQL
+### Switch back to H2 (no Docker needed)
 
 ```powershell
-# 1. Create database
+# Temporarily override the profile for a single run
+& $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
+    "-Dmaven.multiModuleProjectDirectory=$PWD" `
+    spring-boot:run "-Dspring.profiles.active=dev"
+```
+
+H2 console is available at http://localhost:9080/h2-console (`jdbc:h2:mem:crmdb`) when using the `dev` profile.
+
+---
+
+### Production — PostgreSQL (external server)
+
+```powershell
+# 1. Create database on your server
 psql -c "CREATE USER crm WITH PASSWORD 'yourpassword';"
 psql -c "CREATE DATABASE crmdb OWNER crm;"
 
@@ -1486,8 +1538,6 @@ $env:DATABASE_PASSWORD = "yourpassword"
 $env:JWT_SECRET        = "<base64-256-bit-secret>"   # see generator below
 
 # 3. Build and run
-$java = "$env:JAVA_HOME\bin\java.exe"
-$jar  = ".\mvn\wrapper\maven-wrapper.jar"
 & $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
     "-Dmaven.multiModuleProjectDirectory=$PWD" `
     clean package -DskipTests -Pproduction
@@ -1510,7 +1560,7 @@ java -jar target\crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
 | Property | Value | Notes |
 |---|---|---|
 | `server.port` | `9080` | Avoids conflict with OpenCRX on 9090 |
-| `spring.profiles.active` | `dev` | Override with `prod` |
+| `spring.profiles.active` | `postgres` | `dev` for H2, `prod` for external PostgreSQL |
 | `app.jwt.expiration-ms` | `86400000` | 24 hours |
 | `spring.jpa.open-in-view` | `false` | |
 
