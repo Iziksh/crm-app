@@ -4,8 +4,11 @@ import com.crm.domain.enums.ContactStatus;
 import com.crm.dto.request.ContactRequest;
 import com.crm.dto.response.AccountResponse;
 import com.crm.dto.response.ContactResponse;
+import com.crm.dto.response.ImportResultResponse;
 import com.crm.service.AccountService;
+import com.crm.service.AttachmentService;
 import com.crm.service.ContactService;
+import com.crm.service.ImportService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -13,7 +16,9 @@ import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.formlayout.FormLayout;
 import com.vaadin.flow.component.grid.Grid;
+import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.H2;
+import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
@@ -21,10 +26,13 @@ import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.EmailField;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.component.upload.Upload;
+import com.vaadin.flow.component.upload.receivers.MemoryBuffer;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.StreamResource;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.data.domain.PageRequest;
 
@@ -37,12 +45,20 @@ public class ContactsView extends VerticalLayout {
 
     private final ContactService contactService;
     private final AccountService accountService;
+    private final ImportService importService;
+    private final AttachmentService attachmentService;
+    private final SecurityService securityService;
     private final Grid<ContactResponse> grid = new Grid<>(ContactResponse.class, false);
     private final TextField searchField = new TextField();
 
-    public ContactsView(ContactService contactService, AccountService accountService) {
+    public ContactsView(ContactService contactService, AccountService accountService,
+                        ImportService importService, AttachmentService attachmentService,
+                        SecurityService securityService) {
         this.contactService = contactService;
         this.accountService = accountService;
+        this.importService = importService;
+        this.attachmentService = attachmentService;
+        this.securityService = securityService;
         setSizeFull();
         setPadding(true);
 
@@ -95,11 +111,72 @@ public class ContactsView extends VerticalLayout {
         Button addBtn = new Button("Add Contact", VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        HorizontalLayout toolbar = new HorizontalLayout(searchField, addBtn);
+        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        exportBtn.addClickListener(e -> {
+            StreamResource resource = new StreamResource("contacts.csv", () -> {
+                String search = searchField.getValue();
+                String[] headers = {"id","first_name","last_name","email","phone","job_title","department","status","account"};
+                java.util.List<String[]> rows = contactService.findAllForExport(search).stream().map(c -> new String[]{
+                        c.id() != null ? c.id().toString() : "", c.firstName(), c.lastName(), c.email(),
+                        c.phone() != null ? c.phone() : "", c.jobTitle() != null ? c.jobTitle() : "",
+                        c.department() != null ? c.department() : "", c.status() != null ? c.status().name() : "",
+                        c.accountName() != null ? c.accountName() : ""
+                }).toList();
+                return com.crm.util.CsvExporter.build(headers, rows);
+            });
+            Anchor anchor = new Anchor(resource, "");
+            anchor.getElement().setAttribute("download", true);
+            anchor.getStyle().set("display", "none");
+            add(anchor);
+            anchor.getElement().executeJs("this.click(); setTimeout(() => this.remove(), 1000)");
+        });
+
+        Button importBtn = new Button("Import CSV", VaadinIcon.UPLOAD.create());
+        importBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        importBtn.addClickListener(e -> openImportDialog());
+
+        HorizontalLayout toolbar = new HorizontalLayout(searchField, exportBtn, importBtn, addBtn);
         toolbar.setDefaultVerticalComponentAlignment(Alignment.CENTER);
         toolbar.setWidthFull();
         toolbar.expand(searchField);
         return toolbar;
+    }
+
+    private void openImportDialog() {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("Import Contacts from CSV");
+        dialog.setWidth("480px");
+
+        Span hint = new Span("CSV columns: first_name, last_name, email, phone, job_title, department");
+        hint.getStyle().set("font-size", "0.85em").set("color", "var(--lumo-secondary-text-color)");
+
+        MemoryBuffer buffer = new MemoryBuffer();
+        Upload upload = new Upload(buffer);
+        upload.setAcceptedFileTypes("text/csv", ".csv");
+        upload.setMaxFiles(1);
+
+        VerticalLayout resultArea = new VerticalLayout();
+        resultArea.setPadding(false);
+
+        upload.addSucceededListener(event -> {
+            try {
+                ImportResultResponse result = importService.importContacts(buffer.getInputStream());
+                resultArea.removeAll();
+                resultArea.add(new Span("✓ Imported: " + result.imported() + "  ·  Skipped: " + result.skipped()));
+                if (!result.errors().isEmpty()) {
+                    result.errors().stream().limit(5).forEach(err -> resultArea.add(new Span("⚠ " + err)));
+                }
+                refreshGrid();
+            } catch (Exception ex) {
+                resultArea.removeAll();
+                resultArea.add(new Span("Error: " + ex.getMessage()));
+            }
+        });
+
+        dialog.add(hint, upload, resultArea);
+        dialog.getFooter().add(new Button("Close", e2 -> dialog.close()));
+        dialog.open();
     }
 
     private void refreshGrid() {
@@ -145,7 +222,13 @@ public class ContactsView extends VerticalLayout {
         FormLayout form = new FormLayout(firstName, lastName, email, phone, jobTitle, department, status, account, notes);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 2));
         form.setColspan(notes, 2);
-        dialog.add(form);
+
+        AttachmentPanel attachments = new AttachmentPanel(attachmentService, "CONTACT",
+                existing != null ? existing.id() : null, securityService.getUsername());
+
+        VerticalLayout body = new VerticalLayout(form, attachments);
+        body.setPadding(false);
+        dialog.add(body);
 
         Button save = new Button("Save", e -> {
             if (firstName.getValue().isBlank() || lastName.getValue().isBlank() || email.getValue().isBlank()) {
@@ -159,8 +242,10 @@ public class ContactsView extends VerticalLayout {
                     status.getValue(), notes.getValue(),
                     selectedAccount != null ? selectedAccount.id() : null);
             try {
-                if (existing == null) contactService.create(req);
-                else contactService.update(existing.id(), req);
+                ContactResponse saved;
+                if (existing == null) saved = contactService.create(req);
+                else { contactService.update(existing.id(), req); saved = contactService.findById(existing.id()); }
+                attachments.setEntityId(saved.id());
                 refreshGrid();
                 dialog.close();
                 notify("Contact saved", false);

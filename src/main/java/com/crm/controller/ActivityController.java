@@ -7,6 +7,10 @@ import com.crm.dto.request.ActivityRequest;
 import com.crm.dto.response.ActivityNoteResponse;
 import com.crm.dto.response.ActivityResponse;
 import com.crm.service.ActivityService;
+import com.crm.util.CsvExporter;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -98,5 +102,22 @@ public class ActivityController {
     @PatchMapping("/{id}/reopen")
     public ResponseEntity<ActivityResponse> reopen(@PathVariable Long id) {
         return ResponseEntity.ok(activityService.reopen(id));
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<InputStreamResource> export(
+            @RequestParam(required = false) ActivityType type,
+            @RequestParam(required = false) ActivityStatus status,
+            @RequestParam(required = false) String search) {
+        String[] headers = {"id","title","type","status","priority","due_date","assigned_to","account","contact"};
+        List<String[]> rows = activityService.findAllForExport(type, status, search).stream().map(a -> new String[]{
+                CsvExporter.str(a.id()), a.title(), CsvExporter.str(a.type()), CsvExporter.str(a.status()),
+                CsvExporter.str(a.priority()), CsvExporter.str(a.dueDate()),
+                CsvExporter.str(a.assignedToName()), CsvExporter.str(a.accountName()), CsvExporter.str(a.contactName())
+        }).toList();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"activities.csv\"")
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(new InputStreamResource(CsvExporter.build(headers, rows)));
     }
 }

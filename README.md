@@ -1674,7 +1674,7 @@ if (sec.hasRole("ADMIN")) {
 
 ---
 
-### Phase 14 — Data Import / Export
+### Phase 14 — Data Import / Export ✅ COMPLETE (built)
 
 OpenCRX supports Excel/CSV import for Contacts and Accounts, and export of any grid. Adds CSV import for bulk data loading and a "Download CSV" button on every grid.
 
@@ -1747,7 +1747,7 @@ Add "Import CSV" button to `ContactsView` and `AccountsView` toolbar:
 
 ---
 
-### Phase 15 — In-App Notifications
+### Phase 15 — In-App Notifications ✅ COMPLETE (built)
 
 OpenCRX's Subscribe/Notify system creates alerts when subscribed entities change. Adds a `Notification` entity, a notification bell in the header, and background event triggers on key CRM actions.
 
@@ -1820,7 +1820,7 @@ In **`MainLayout.createHeader()`**:
 
 ---
 
-### Phase 16 — Documents & Attachments
+### Phase 16 — Documents & Attachments ✅ COMPLETE (built)
 
 OpenCRX supports attaching documents to any CRM object. Adds a generic `Attachment` entity that can be linked to an Account, Contact, Activity, Lead, Opportunity, or Contract.
 

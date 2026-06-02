@@ -34,24 +34,31 @@ public class ActivityService {
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
+    private final NotificationService notificationService;
 
     public ActivityService(ActivityRepository activityRepository,
                            ActivityNoteRepository noteRepository,
                            UserRepository userRepository,
                            AccountRepository accountRepository,
-                           ContactRepository contactRepository) {
+                           ContactRepository contactRepository,
+                           NotificationService notificationService) {
         this.activityRepository = activityRepository;
         this.noteRepository = noteRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
+        this.notificationService = notificationService;
     }
 
     public ActivityResponse create(ActivityRequest request, String createdByUsername) {
         Activity activity = mapToEntity(new Activity(), request);
-        userRepository.findByUsername(createdByUsername)
-                .ifPresent(activity::setCreatedBy);
-        return ActivityResponse.from(activityRepository.save(activity));
+        userRepository.findByUsername(createdByUsername).ifPresent(activity::setCreatedBy);
+        Activity saved = activityRepository.save(activity);
+        if (saved.getAssignedTo() != null) {
+            notificationService.notify(saved.getAssignedTo().getId(),
+                    "New activity assigned: " + saved.getTitle(), "ACTIVITY", saved.getId());
+        }
+        return ActivityResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -87,6 +94,11 @@ public class ActivityService {
     }
 
     @Transactional(readOnly = true)
+    public List<ActivityResponse> findAllForExport(ActivityType type, ActivityStatus status, String search) {
+        return activityRepository.findAll(buildSpec(type, status, search)).stream().map(ActivityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ActivityResponse> findByType(ActivityType type) {
         return activityRepository.findByType(type).stream().map(ActivityResponse::from).toList();
     }
@@ -114,7 +126,12 @@ public class ActivityService {
         Activity activity = getOrThrow(id);
         activity.setStatus(ActivityStatus.RESOLVED);
         activity.setResolvedAt(LocalDateTime.now());
-        return ActivityResponse.from(activityRepository.save(activity));
+        Activity saved = activityRepository.save(activity);
+        if (saved.getCreatedBy() != null) {
+            notificationService.notify(saved.getCreatedBy().getId(),
+                    "Activity resolved: " + saved.getTitle(), "ACTIVITY", saved.getId());
+        }
+        return ActivityResponse.from(saved);
     }
 
     public ActivityResponse close(Long id) {

@@ -61,6 +61,16 @@ public class ContactService {
     }
 
     @Transactional(readOnly = true)
+    public List<ContactResponse> findAllForExport(String search) {
+        if (search != null && !search.isBlank()) {
+            return contactRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(
+                    search, search, org.springframework.data.domain.Pageable.unpaged())
+                    .getContent().stream().map(ContactResponse::from).toList();
+        }
+        return contactRepository.findAll().stream().map(ContactResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ContactResponse> findByAccount(Long accountId) {
         if (!accountRepository.existsById(accountId)) {
             throw new ResourceNotFoundException("Account", "id", accountId);

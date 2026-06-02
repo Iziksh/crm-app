@@ -33,19 +33,22 @@ public class OpportunityService {
     private final ContactRepository contactRepository;
     private final LeadRepository leadRepository;
     private final QuoteRepository quoteRepository;
+    private final NotificationService notificationService;
 
     public OpportunityService(OpportunityRepository opportunityRepository,
                               UserRepository userRepository,
                               AccountRepository accountRepository,
                               ContactRepository contactRepository,
                               LeadRepository leadRepository,
-                              QuoteRepository quoteRepository) {
+                              QuoteRepository quoteRepository,
+                              NotificationService notificationService) {
         this.opportunityRepository = opportunityRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
         this.leadRepository = leadRepository;
         this.quoteRepository = quoteRepository;
+        this.notificationService = notificationService;
     }
 
     public OpportunityResponse create(OpportunityRequest request, String createdByUsername) {
@@ -86,6 +89,11 @@ public class OpportunityService {
     }
 
     @Transactional(readOnly = true)
+    public List<OpportunityResponse> findAllForExport(OpportunityStage stage, String search) {
+        return opportunityRepository.findAll(buildSpec(stage, search)).stream().map(OpportunityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<OpportunityResponse> findByStage(OpportunityStage stage) {
         return opportunityRepository.findByStage(stage).stream().map(OpportunityResponse::from).toList();
     }
@@ -108,7 +116,13 @@ public class OpportunityService {
 
     public OpportunityResponse update(Long id, OpportunityRequest request) {
         Opportunity opp = getOrThrow(id);
-        return OpportunityResponse.from(opportunityRepository.save(mapToEntity(opp, request)));
+        boolean becomingWon = request.stage() == OpportunityStage.WON && opp.getStage() != OpportunityStage.WON;
+        Opportunity saved = opportunityRepository.save(mapToEntity(opp, request));
+        if (becomingWon && saved.getAssignedTo() != null) {
+            notificationService.notify(saved.getAssignedTo().getId(),
+                    "Opportunity WON: " + saved.getName(), "OPPORTUNITY", saved.getId());
+        }
+        return OpportunityResponse.from(saved);
     }
 
     public void delete(Long id) {

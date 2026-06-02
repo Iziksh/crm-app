@@ -35,23 +35,31 @@ public class LeadService {
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
+    private final NotificationService notificationService;
 
     public LeadService(LeadRepository leadRepository,
                        OpportunityRepository opportunityRepository,
                        UserRepository userRepository,
                        AccountRepository accountRepository,
-                       ContactRepository contactRepository) {
+                       ContactRepository contactRepository,
+                       NotificationService notificationService) {
         this.leadRepository = leadRepository;
         this.opportunityRepository = opportunityRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
+        this.notificationService = notificationService;
     }
 
     public LeadResponse create(LeadRequest request, String createdByUsername) {
         Lead lead = mapToEntity(new Lead(), request);
         userRepository.findByUsername(createdByUsername).ifPresent(lead::setCreatedBy);
-        return LeadResponse.from(leadRepository.save(lead));
+        Lead saved = leadRepository.save(lead);
+        if (saved.getAssignedTo() != null) {
+            notificationService.notify(saved.getAssignedTo().getId(),
+                    "New lead assigned: " + saved.getTitle(), "LEAD", saved.getId());
+        }
+        return LeadResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -87,6 +95,11 @@ public class LeadService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
+    }
+
+    @Transactional(readOnly = true)
+    public List<LeadResponse> findAllForExport(LeadStatus status, String search) {
+        return leadRepository.findAll(buildSpec(status, search)).stream().map(LeadResponse::from).toList();
     }
 
     @Transactional(readOnly = true)

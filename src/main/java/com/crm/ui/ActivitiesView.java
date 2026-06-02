@@ -11,6 +11,7 @@ import com.crm.dto.response.ActivityResponse;
 import com.crm.dto.response.ContactResponse;
 import com.crm.service.AccountService;
 import com.crm.service.ActivityService;
+import com.crm.service.AttachmentService;
 import com.crm.service.ContactService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
@@ -50,6 +51,7 @@ public class ActivitiesView extends VerticalLayout {
     private final AccountService accountService;
     private final ContactService contactService;
     private final SecurityService securityService;
+    private final AttachmentService attachmentService;
 
     private final Grid<ActivityResponse> grid = new Grid<>(ActivityResponse.class, false);
     private final TextField searchField = new TextField();
@@ -61,11 +63,13 @@ public class ActivitiesView extends VerticalLayout {
     public ActivitiesView(ActivityService activityService,
                           AccountService accountService,
                           ContactService contactService,
-                          SecurityService securityService) {
+                          SecurityService securityService,
+                          AttachmentService attachmentService) {
         this.activityService = activityService;
         this.accountService = accountService;
         this.contactService = contactService;
         this.securityService = securityService;
+        this.attachmentService = attachmentService;
         setSizeFull();
         setPadding(true);
 
@@ -249,7 +253,27 @@ public class ActivitiesView extends VerticalLayout {
         Button addBtn = new Button("New Activity", VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        HorizontalLayout toolbar = new HorizontalLayout(typeFilter, statusFilter, searchField, addBtn);
+        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        exportBtn.addClickListener(e -> {
+            com.vaadin.flow.server.StreamResource resource = new com.vaadin.flow.server.StreamResource("activities.csv", () -> {
+                String[] headers = {"id","title","type","status","priority","due_date","assigned_to","account","contact"};
+                java.util.List<String[]> rows = activityService.findAllForExport(typeFilter.getValue(), statusFilter.getValue(), searchField.getValue()).stream().map(a -> new String[]{
+                        a.id() != null ? a.id().toString() : "", a.title(), a.type() != null ? a.type().name() : "",
+                        a.status() != null ? a.status().name() : "", a.priority() != null ? a.priority().name() : "",
+                        a.dueDate() != null ? a.dueDate().toString() : "", a.assignedToName() != null ? a.assignedToName() : "",
+                        a.accountName() != null ? a.accountName() : "", a.contactName() != null ? a.contactName() : ""
+                }).toList();
+                return com.crm.util.CsvExporter.build(headers, rows);
+            });
+            com.vaadin.flow.component.html.Anchor anchor = new com.vaadin.flow.component.html.Anchor(resource, "");
+            anchor.getElement().setAttribute("download", true);
+            anchor.getStyle().set("display", "none");
+            add(anchor);
+            anchor.getElement().executeJs("this.click(); setTimeout(() => this.remove(), 1000)");
+        });
+
+        HorizontalLayout toolbar = new HorizontalLayout(typeFilter, statusFilter, searchField, exportBtn, addBtn);
         toolbar.setDefaultVerticalComponentAlignment(Alignment.END);
         toolbar.setWidthFull();
         toolbar.expand(searchField);
@@ -311,7 +335,13 @@ public class ActivitiesView extends VerticalLayout {
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 2));
         form.setColspan(title, 2);
         form.setColspan(description, 2);
-        dialog.add(form);
+
+        AttachmentPanel attachments = new AttachmentPanel(attachmentService, "ACTIVITY",
+                existing != null ? existing.id() : null, securityService.getUsername());
+
+        VerticalLayout body = new VerticalLayout(form, attachments);
+        body.setPadding(false);
+        dialog.add(body);
 
         Button save = new Button("Save", e -> {
             if (title.getValue().isBlank()) {
@@ -326,8 +356,10 @@ public class ActivitiesView extends VerticalLayout {
                     account.getValue() != null ? account.getValue().id() : null,
                     contact.getValue() != null ? contact.getValue().id() : null);
             try {
-                if (existing == null) activityService.create(req, securityService.getUsername());
-                else activityService.update(existing.id(), req);
+                ActivityResponse saved;
+                if (existing == null) saved = activityService.create(req, securityService.getUsername());
+                else { activityService.update(existing.id(), req); saved = activityService.findById(existing.id()); }
+                attachments.setEntityId(saved.id());
                 refreshGrid();
                 dialog.close();
                 notify("Activity saved", false);

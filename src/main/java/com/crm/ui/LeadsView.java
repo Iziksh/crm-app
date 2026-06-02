@@ -124,7 +124,28 @@ public class LeadsView extends VerticalLayout {
         Button addBtn = new Button("New Lead", VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        HorizontalLayout toolbar = new HorizontalLayout(statusFilter, searchField, addBtn);
+        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        exportBtn.addClickListener(e -> {
+            com.vaadin.flow.server.StreamResource resource = new com.vaadin.flow.server.StreamResource("leads.csv", () -> {
+                String[] headers = {"id","title","first_name","last_name","email","company","status","source","estimated_value","currency"};
+                java.util.List<String[]> rows = leadService.findAllForExport(statusFilter.getValue(), searchField.getValue()).stream().map(l -> new String[]{
+                        l.id() != null ? l.id().toString() : "", l.title(),
+                        l.firstName() != null ? l.firstName() : "", l.lastName() != null ? l.lastName() : "",
+                        l.email() != null ? l.email() : "", l.company() != null ? l.company() : "",
+                        l.status() != null ? l.status().name() : "", l.source() != null ? l.source().name() : "",
+                        l.estimatedValue() != null ? l.estimatedValue().toString() : "", l.currency() != null ? l.currency() : ""
+                }).toList();
+                return com.crm.util.CsvExporter.build(headers, rows);
+            });
+            com.vaadin.flow.component.html.Anchor anchor = new com.vaadin.flow.component.html.Anchor(resource, "");
+            anchor.getElement().setAttribute("download", true);
+            anchor.getStyle().set("display", "none");
+            add(anchor);
+            anchor.getElement().executeJs("this.click(); setTimeout(() => this.remove(), 1000)");
+        });
+
+        HorizontalLayout toolbar = new HorizontalLayout(statusFilter, searchField, exportBtn, addBtn);
         toolbar.setDefaultVerticalComponentAlignment(Alignment.END);
         toolbar.setWidthFull();
         toolbar.expand(searchField);

@@ -5,10 +5,14 @@ import com.crm.dto.request.LeadRequest;
 import com.crm.dto.response.LeadResponse;
 import com.crm.dto.response.OpportunityResponse;
 import com.crm.service.LeadService;
+import com.crm.util.CsvExporter;
 import jakarta.validation.Valid;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -63,5 +67,22 @@ public class LeadController {
     @PostMapping("/{id}/convert")
     public ResponseEntity<OpportunityResponse> convert(@PathVariable Long id) {
         return ResponseEntity.ok(leadService.convert(id));
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<InputStreamResource> export(
+            @RequestParam(required = false) LeadStatus status,
+            @RequestParam(required = false) String search) {
+        String[] headers = {"id","title","first_name","last_name","email","company","status","source","estimated_value","currency","close_date","assigned_to"};
+        List<String[]> rows = leadService.findAllForExport(status, search).stream().map(l -> new String[]{
+                CsvExporter.str(l.id()), l.title(), CsvExporter.str(l.firstName()), CsvExporter.str(l.lastName()),
+                CsvExporter.str(l.email()), CsvExporter.str(l.company()), CsvExporter.str(l.status()),
+                CsvExporter.str(l.source()), CsvExporter.str(l.estimatedValue()), CsvExporter.str(l.currency()),
+                CsvExporter.str(l.closeDate()), CsvExporter.str(l.assignedToName())
+        }).toList();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"leads.csv\"")
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(new InputStreamResource(CsvExporter.build(headers, rows)));
     }
 }

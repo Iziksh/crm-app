@@ -63,6 +63,16 @@ public class AccountService {
                 .stream().map(AccountResponse::from).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<AccountResponse> findAllForExport(String search) {
+        if (search != null && !search.isBlank()) {
+            return accountRepository.findByNameContainingIgnoreCase(search,
+                    org.springframework.data.domain.Pageable.unpaged()).getContent()
+                    .stream().map(AccountResponse::from).toList();
+        }
+        return accountRepository.findAll().stream().map(AccountResponse::from).toList();
+    }
+
     public AccountResponse update(Long id, AccountRequest request) {
         Account account = getOrThrow(id);
         if (request.email() != null && !request.email().equals(account.getEmail())
