@@ -68,12 +68,16 @@ public class MainLayout extends AppLayout {
         sales.addItem(new SideNavItem("Sales Orders", SalesOrdersView.class, VaadinIcon.PACKAGE.create()));
         sales.addItem(new SideNavItem("Contracts", ContractsView.class, VaadinIcon.FILE_TEXT.create()));
         sales.addItem(new SideNavItem("Forecast", ForecastView.class, VaadinIcon.CHART.create()));
+        sales.addItem(new SideNavItem("Products", ProductsView.class, VaadinIcon.CART.create()));
         nav.addItem(sales);
 
         SideNavItem settings = new SideNavItem("Settings");
         settings.setPrefixComponent(VaadinIcon.COG.create());
         settings.addItem(new SideNavItem("Workspaces", WorkspacesView.class, VaadinIcon.GROUP.create()));
         settings.addItem(new SideNavItem("Saved Searches", SavedSearchesView.class, VaadinIcon.SEARCH.create()));
+        if (securityService.hasRole("ADMIN")) {
+            settings.addItem(new SideNavItem("Users", UsersView.class, VaadinIcon.USERS.create()));
+        }
         nav.addItem(settings);
 
         addToDrawer(nav);

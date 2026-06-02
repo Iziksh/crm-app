@@ -1,12 +1,16 @@
 package com.crm.service;
 
 import com.crm.domain.entity.Activity;
+import com.crm.domain.entity.ActivityNote;
 import com.crm.domain.enums.ActivityStatus;
 import com.crm.domain.enums.ActivityType;
+import com.crm.dto.request.ActivityNoteRequest;
 import com.crm.dto.request.ActivityRequest;
+import com.crm.dto.response.ActivityNoteResponse;
 import com.crm.dto.response.ActivityResponse;
 import com.crm.exception.ResourceNotFoundException;
 import com.crm.repository.AccountRepository;
+import com.crm.repository.ActivityNoteRepository;
 import com.crm.repository.ActivityRepository;
 import com.crm.repository.ContactRepository;
 import com.crm.repository.UserRepository;
@@ -26,15 +30,18 @@ import java.util.List;
 public class ActivityService {
 
     private final ActivityRepository activityRepository;
+    private final ActivityNoteRepository noteRepository;
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
 
     public ActivityService(ActivityRepository activityRepository,
+                           ActivityNoteRepository noteRepository,
                            UserRepository userRepository,
                            AccountRepository accountRepository,
                            ContactRepository contactRepository) {
         this.activityRepository = activityRepository;
+        this.noteRepository = noteRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
@@ -113,6 +120,34 @@ public class ActivityService {
     public ActivityResponse close(Long id) {
         Activity activity = getOrThrow(id);
         activity.setStatus(ActivityStatus.CLOSED);
+        return ActivityResponse.from(activityRepository.save(activity));
+    }
+
+    public ActivityNoteResponse addNote(Long activityId, ActivityNoteRequest request, String authorUsername) {
+        Activity activity = getOrThrow(activityId);
+        ActivityNote note = new ActivityNote();
+        note.setText(request.text());
+        note.setActivity(activity);
+        userRepository.findByUsername(authorUsername).ifPresent(note::setAuthor);
+        return ActivityNoteResponse.from(noteRepository.save(note));
+    }
+
+    public void deleteNote(Long noteId) {
+        noteRepository.delete(noteRepository.findById(noteId)
+                .orElseThrow(() -> new ResourceNotFoundException("ActivityNote", "id", noteId)));
+    }
+
+    public ActivityResponse assign(Long activityId, String assignedToUsername) {
+        Activity activity = getOrThrow(activityId);
+        userRepository.findByUsername(assignedToUsername).ifPresent(activity::setAssignedTo);
+        activity.setStatus(ActivityStatus.IN_PROGRESS);
+        return ActivityResponse.from(activityRepository.save(activity));
+    }
+
+    public ActivityResponse reopen(Long activityId) {
+        Activity activity = getOrThrow(activityId);
+        activity.setStatus(ActivityStatus.IN_PROGRESS);
+        activity.setResolvedAt(null);
         return ActivityResponse.from(activityRepository.save(activity));
     }
 

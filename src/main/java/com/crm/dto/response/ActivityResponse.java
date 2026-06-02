@@ -7,6 +7,7 @@ import com.crm.domain.enums.ActivityType;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record ActivityResponse(
         Long id,
@@ -23,6 +24,7 @@ public record ActivityResponse(
         String accountName,
         Long contactId,
         String contactName,
+        List<ActivityNoteResponse> notes,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -42,6 +44,7 @@ public record ActivityResponse(
                 a.getAccount() != null ? a.getAccount().getName() : null,
                 a.getContact() != null ? a.getContact().getId() : null,
                 a.getContact() != null ? (a.getContact().getFirstName() + " " + a.getContact().getLastName()) : null,
+                a.getNotes().stream().map(ActivityNoteResponse::from).toList(),
                 a.getCreatedAt(),
                 a.getUpdatedAt()
         );

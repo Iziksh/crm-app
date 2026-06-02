@@ -23,6 +23,13 @@ public class SecurityService {
         return getAuthenticatedUser().map(UserDetails::getUsername).orElse("unknown");
     }
 
+    public boolean hasRole(String role) {
+        return getAuthenticatedUser()
+                .map(u -> u.getAuthorities().stream()
+                        .anyMatch(a -> a.getAuthority().equals("ROLE_" + role)))
+                .orElse(false);
+    }
+
     public void logout() {
         authenticationContext.logout();
     }

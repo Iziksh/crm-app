@@ -3,8 +3,10 @@ package com.crm.ui;
 import com.crm.domain.enums.ActivityPriority;
 import com.crm.domain.enums.ActivityStatus;
 import com.crm.domain.enums.ActivityType;
+import com.crm.dto.request.ActivityNoteRequest;
 import com.crm.dto.request.ActivityRequest;
 import com.crm.dto.response.AccountResponse;
+import com.crm.dto.response.ActivityNoteResponse;
 import com.crm.dto.response.ActivityResponse;
 import com.crm.dto.response.ContactResponse;
 import com.crm.service.AccountService;
@@ -18,7 +20,10 @@ import com.vaadin.flow.component.datepicker.DatePicker;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.formlayout.FormLayout;
 import com.vaadin.flow.component.grid.Grid;
+import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
+import com.vaadin.flow.component.html.H4;
+import com.vaadin.flow.component.html.Hr;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
@@ -44,24 +49,30 @@ public class ActivitiesView extends VerticalLayout {
     private final ActivityService activityService;
     private final AccountService accountService;
     private final ContactService contactService;
+    private final SecurityService securityService;
 
     private final Grid<ActivityResponse> grid = new Grid<>(ActivityResponse.class, false);
     private final TextField searchField = new TextField();
     private final ComboBox<ActivityType> typeFilter = new ComboBox<>("Type");
     private final ComboBox<ActivityStatus> statusFilter = new ComboBox<>("Status");
+    private final VerticalLayout notesPanel = new VerticalLayout();
+    private ActivityResponse selectedActivity = null;
 
     public ActivitiesView(ActivityService activityService,
                           AccountService accountService,
-                          ContactService contactService) {
+                          ContactService contactService,
+                          SecurityService securityService) {
         this.activityService = activityService;
         this.accountService = accountService;
         this.contactService = contactService;
+        this.securityService = securityService;
         setSizeFull();
         setPadding(true);
 
         configureGrid();
+        configureNotesPanel();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Activities"), toolbar, grid);
+        add(new H2("Activities"), toolbar, grid, notesPanel);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -77,7 +88,7 @@ public class ActivitiesView extends VerticalLayout {
     }
 
     private void configureGrid() {
-        grid.setSizeFull();
+        grid.setHeight("380px");
         grid.addColumn(ActivityResponse::title).setHeader("Title").setSortable(true).setFlexGrow(2);
         grid.addComponentColumn(a -> typeBadge(a.type())).setHeader("Type").setFlexGrow(0).setWidth("110px");
         grid.addComponentColumn(a -> statusBadge(a.status())).setHeader("Status").setFlexGrow(0).setWidth("120px");
@@ -89,10 +100,26 @@ public class ActivitiesView extends VerticalLayout {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
 
+            if (activity.status() == ActivityStatus.OPEN) {
+                Button assign = new Button(VaadinIcon.USER_CHECK.create(), e -> {
+                    activityService.assign(activity.id(), securityService.getUsername());
+                    refreshGrid();
+                    if (selectedActivity != null && selectedActivity.id().equals(activity.id())) {
+                        selectedActivity = activityService.findById(activity.id());
+                        refreshNotesPanel();
+                    }
+                    notify("Activity assigned and set to In Progress", false);
+                });
+                assign.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                assign.getElement().setAttribute("title", "Assign to me / Set In Progress");
+                actions.add(assign);
+            }
+
             if (activity.status() != ActivityStatus.RESOLVED && activity.status() != ActivityStatus.CLOSED) {
                 Button resolve = new Button(VaadinIcon.CHECK.create(), e -> {
                     activityService.resolve(activity.id());
                     refreshGrid();
+                    refreshNotesPanelIfSelected(activity.id());
                     notify("Activity resolved", false);
                 });
                 resolve.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SUCCESS);
@@ -100,22 +127,111 @@ public class ActivitiesView extends VerticalLayout {
                 actions.add(resolve);
             }
 
+            if (activity.status() == ActivityStatus.RESOLVED || activity.status() == ActivityStatus.CLOSED) {
+                Button reopen = new Button(VaadinIcon.REFRESH.create(), e -> {
+                    activityService.reopen(activity.id());
+                    refreshGrid();
+                    refreshNotesPanelIfSelected(activity.id());
+                    notify("Activity reopened", false);
+                });
+                reopen.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                reopen.getElement().setAttribute("title", "Reopen");
+                actions.add(reopen);
+            }
+
+            Button notes = new Button(VaadinIcon.COMMENT.create(), e -> {
+                selectedActivity = activityService.findById(activity.id());
+                refreshNotesPanel();
+            });
+            notes.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+            notes.getElement().setAttribute("title", "Notes");
+
             Button edit = new Button(VaadinIcon.EDIT.create(), e -> openDialog(activity));
             edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
 
             Button delete = new Button(VaadinIcon.TRASH.create(), e -> confirmDelete(activity));
             delete.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ERROR);
 
-            actions.add(edit, delete);
+            actions.add(notes, edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("150px");
+        }).setHeader("Actions").setFlexGrow(0).setWidth("220px");
+    }
+
+    private void configureNotesPanel() {
+        notesPanel.setPadding(false);
+        notesPanel.setVisible(false);
+        notesPanel.getStyle().set("border-top", "1px solid var(--lumo-contrast-20pct)").set("margin-top", "8px");
+    }
+
+    private void refreshNotesPanelIfSelected(Long activityId) {
+        if (selectedActivity != null && selectedActivity.id().equals(activityId)) {
+            selectedActivity = activityService.findById(activityId);
+            refreshNotesPanel();
+        }
+    }
+
+    private void refreshNotesPanel() {
+        notesPanel.removeAll();
+        if (selectedActivity == null) {
+            notesPanel.setVisible(false);
+            return;
+        }
+        notesPanel.setVisible(true);
+
+        HorizontalLayout header = new HorizontalLayout(
+                new H4("Notes — " + selectedActivity.title()),
+                new Button(VaadinIcon.CLOSE.create(), e -> {
+                    selectedActivity = null;
+                    notesPanel.setVisible(false);
+                })
+        );
+        header.setDefaultVerticalComponentAlignment(Alignment.CENTER);
+        header.expand(header.getComponentAt(0));
+        notesPanel.add(header, new Hr());
+
+        List<ActivityNoteResponse> notes = selectedActivity.notes();
+        if (notes.isEmpty()) {
+            notesPanel.add(new Span("No notes yet."));
+        } else {
+            for (ActivityNoteResponse note : notes) {
+                Div card = new Div();
+                card.getStyle()
+                    .set("background", "var(--lumo-contrast-5pct)")
+                    .set("border-radius", "4px")
+                    .set("padding", "8px 12px")
+                    .set("margin-bottom", "6px");
+                Span meta = new Span(note.authorName() + "  ·  "
+                        + (note.createdAt() != null ? note.createdAt().toString().replace("T", " ").substring(0, 16) : ""));
+                meta.getStyle().set("font-size", "0.8em").set("color", "var(--lumo-secondary-text-color)");
+                Div text = new Div();
+                text.setText(note.text());
+                card.add(meta, text);
+                notesPanel.add(card);
+            }
+        }
+
+        notesPanel.add(new Hr());
+        TextArea noteText = new TextArea();
+        noteText.setPlaceholder("Add a note…");
+        noteText.setWidthFull();
+        noteText.setMinHeight("70px");
+        Button addNote = new Button("Add Note", VaadinIcon.COMMENT.create(), e -> {
+            if (noteText.getValue().isBlank()) return;
+            activityService.addNote(selectedActivity.id(),
+                    new ActivityNoteRequest(noteText.getValue()),
+                    securityService.getUsername());
+            selectedActivity = activityService.findById(selectedActivity.id());
+            refreshNotesPanel();
+        });
+        addNote.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
+        notesPanel.add(noteText, addNote);
     }
 
     private HorizontalLayout buildToolbar() {
         typeFilter.setItems(ActivityType.values());
         typeFilter.setPlaceholder("All Types");
         typeFilter.setClearButtonVisible(true);
-        typeFilter.setWidth("140px");
+        typeFilter.setWidth("150px");
         typeFilter.addValueChangeListener(e -> refreshGrid());
 
         statusFilter.setItems(ActivityStatus.values());
@@ -185,14 +301,10 @@ public class ActivitiesView extends VerticalLayout {
             if (existing.status() != null) status.setValue(existing.status());
             if (existing.priority() != null) priority.setValue(existing.priority());
             if (existing.dueDate() != null) dueDate.setValue(existing.dueDate());
-            if (existing.accountId() != null) {
-                accounts.stream().filter(a -> a.id().equals(existing.accountId()))
-                        .findFirst().ifPresent(account::setValue);
-            }
-            if (existing.contactId() != null) {
-                contacts.stream().filter(c -> c.id().equals(existing.contactId()))
-                        .findFirst().ifPresent(contact::setValue);
-            }
+            if (existing.accountId() != null)
+                accounts.stream().filter(a -> a.id().equals(existing.accountId())).findFirst().ifPresent(account::setValue);
+            if (existing.contactId() != null)
+                contacts.stream().filter(c -> c.id().equals(existing.contactId())).findFirst().ifPresent(contact::setValue);
         }
 
         FormLayout form = new FormLayout(title, type, status, priority, dueDate, account, contact, description);
@@ -207,14 +319,14 @@ public class ActivitiesView extends VerticalLayout {
                 title.setErrorMessage("Title is required");
                 return;
             }
-            Long accountId = account.getValue() != null ? account.getValue().id() : null;
-            Long contactId = contact.getValue() != null ? contact.getValue().id() : null;
             ActivityRequest req = new ActivityRequest(
                     title.getValue(), description.getValue(),
                     type.getValue(), status.getValue(), priority.getValue(),
-                    dueDate.getValue(), null, accountId, contactId);
+                    dueDate.getValue(), null,
+                    account.getValue() != null ? account.getValue().id() : null,
+                    contact.getValue() != null ? contact.getValue().id() : null);
             try {
-                if (existing == null) activityService.create(req, "admin");
+                if (existing == null) activityService.create(req, securityService.getUsername());
                 else activityService.update(existing.id(), req);
                 refreshGrid();
                 dialog.close();
@@ -238,6 +350,10 @@ public class ActivitiesView extends VerticalLayout {
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             activityService.delete(activity.id());
+            if (selectedActivity != null && selectedActivity.id().equals(activity.id())) {
+                selectedActivity = null;
+                notesPanel.setVisible(false);
+            }
             refreshGrid();
             notify("Activity deleted", false);
         });
@@ -246,12 +362,14 @@ public class ActivitiesView extends VerticalLayout {
 
     private Span typeBadge(ActivityType type) {
         if (type == null) return new Span();
-        Span badge = new Span(type.name());
+        Span badge = new Span(type.name().replace('_', ' '));
         String theme = switch (type) {
             case BUG -> "badge error";
             case FEATURE -> "badge success";
             case MEETING -> "badge primary";
             case CALL -> "badge";
+            case EMAIL -> "badge";
+            case SALES_VISIT -> "badge success";
             default -> "badge contrast";
         };
         badge.getElement().getThemeList().add(theme);

@@ -2,7 +2,9 @@ package com.crm.controller;
 
 import com.crm.domain.enums.ActivityStatus;
 import com.crm.domain.enums.ActivityType;
+import com.crm.dto.request.ActivityNoteRequest;
 import com.crm.dto.request.ActivityRequest;
+import com.crm.dto.response.ActivityNoteResponse;
 import com.crm.dto.response.ActivityResponse;
 import com.crm.service.ActivityService;
 import jakarta.validation.Valid;
@@ -70,5 +72,31 @@ public class ActivityController {
     @PatchMapping("/{id}/close")
     public ResponseEntity<ActivityResponse> close(@PathVariable Long id) {
         return ResponseEntity.ok(activityService.close(id));
+    }
+
+    @PostMapping("/{id}/notes")
+    public ResponseEntity<ActivityNoteResponse> addNote(
+            @PathVariable Long id,
+            @Valid @RequestBody ActivityNoteRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(activityService.addNote(id, request, userDetails.getUsername()));
+    }
+
+    @DeleteMapping("/{id}/notes/{noteId}")
+    public ResponseEntity<Void> deleteNote(@PathVariable Long id, @PathVariable Long noteId) {
+        activityService.deleteNote(noteId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{id}/assign")
+    public ResponseEntity<ActivityResponse> assign(@PathVariable Long id,
+                                                   @RequestParam String username) {
+        return ResponseEntity.ok(activityService.assign(id, username));
+    }
+
+    @PatchMapping("/{id}/reopen")
+    public ResponseEntity<ActivityResponse> reopen(@PathVariable Long id) {
+        return ResponseEntity.ok(activityService.reopen(id));
     }
 }

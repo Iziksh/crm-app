@@ -1423,7 +1423,7 @@ Add `SavedSearchesView` (`@Route("saved-searches")`):
 
 ---
 
-### Phase 11 — Activity Notes & Follow-ups
+### Phase 11 — Activity Notes & Follow-ups ✅ COMPLETE (built)
 
 OpenCRX tracks every state change and note on an activity as a timestamped follow-up entry. Adds `ActivityNote` entity, timeline UI inside the activity row, and proper status-transition actions (Assign → In Progress, Complete, Reopen, Close).
 
@@ -1502,7 +1502,7 @@ In **`ActivitiesView`**, add a detail row expansion (or side panel) per activity
 
 ---
 
-### Phase 12 — Product Catalog
+### Phase 12 — Product Catalog ✅ COMPLETE (built)
 
 OpenCRX has a full product/price list model. Adding a product catalog lets users select products when building quote and sales-order line items instead of typing free-text product names.
 
@@ -1607,7 +1607,7 @@ sales.addItem(new SideNavItem("Products", ProductsView.class, VaadinIcon.CART.cr
 
 ---
 
-### Phase 13 — User Management UI (Admin)
+### Phase 13 — User Management UI (Admin) ✅ COMPLETE (built)
 
 OpenCRX's "Managing Users" guide covers creating principals, assigning groups, and disabling segment access. Adds an admin-only Users view to manage CRM users and their roles.
 

@@ -6,11 +6,13 @@ import com.crm.dto.request.QuoteRequest;
 import com.crm.dto.response.AccountResponse;
 import com.crm.dto.response.ContactResponse;
 import com.crm.dto.response.OpportunityResponse;
+import com.crm.dto.response.ProductResponse;
 import com.crm.dto.response.QuoteLineItemResponse;
 import com.crm.dto.response.QuoteResponse;
 import com.crm.service.AccountService;
 import com.crm.service.ContactService;
 import com.crm.service.OpportunityService;
+import com.crm.service.ProductService;
 import com.crm.service.QuoteService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
@@ -49,6 +51,7 @@ public class QuotesView extends VerticalLayout {
     private final AccountService accountService;
     private final ContactService contactService;
     private final OpportunityService opportunityService;
+    private final ProductService productService;
 
     private final Grid<QuoteResponse> grid = new Grid<>(QuoteResponse.class, false);
     private final Grid<QuoteLineItemResponse> lineItemGrid = new Grid<>(QuoteLineItemResponse.class, false);
@@ -60,11 +63,13 @@ public class QuotesView extends VerticalLayout {
     public QuotesView(QuoteService quoteService,
                       AccountService accountService,
                       ContactService contactService,
-                      OpportunityService opportunityService) {
+                      OpportunityService opportunityService,
+                      ProductService productService) {
         this.quoteService = quoteService;
         this.accountService = accountService;
         this.contactService = contactService;
         this.opportunityService = opportunityService;
+        this.productService = productService;
         setSizeFull();
         setPadding(true);
 
@@ -167,23 +172,43 @@ public class QuotesView extends VerticalLayout {
         if (selectedQuote == null) return;
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("Add Line Item");
-        dialog.setWidth("420px");
+        dialog.setWidth("440px");
+
+        ComboBox<ProductResponse> productCombo = new ComboBox<>("Product");
+        productCombo.setItems(productService.findAll(PageRequest.of(0, 500), null).getContent());
+        productCombo.setItemLabelGenerator(p -> p.sku() + " — " + p.name());
+        productCombo.setClearButtonVisible(true);
+        productCombo.setWidthFull();
 
         TextField productName = new TextField("Product Name");
+        productName.setPlaceholder("Or type manually");
+
         NumberField qty = new NumberField("Quantity");
         NumberField unitPrice = new NumberField("Unit Price");
         NumberField discount = new NumberField("Discount %");
         discount.setValue(0.0);
 
-        FormLayout form = new FormLayout(productName, qty, unitPrice, discount);
+        productCombo.addValueChangeListener(e -> {
+            ProductResponse p = e.getValue();
+            if (p != null) {
+                productName.setValue(p.name());
+                unitPrice.setValue(p.unitPrice() != null ? p.unitPrice().doubleValue() : 0.0);
+            }
+        });
+
+        FormLayout form = new FormLayout(productCombo, productName, qty, unitPrice, discount);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 2));
+        form.setColspan(productCombo, 2);
         form.setColspan(productName, 2);
         dialog.add(form);
 
         Button save = new Button("Add", e -> {
-            if (productName.getValue().isBlank()) { productName.setInvalid(true); return; }
+            String name = productName.getValue().isBlank()
+                    ? (productCombo.getValue() != null ? productCombo.getValue().name() : "")
+                    : productName.getValue();
+            if (name.isBlank()) { productName.setInvalid(true); return; }
             QuoteLineItemRequest req = new QuoteLineItemRequest(
-                    productName.getValue(),
+                    name,
                     qty.getValue() != null ? BigDecimal.valueOf(qty.getValue()) : null,
                     unitPrice.getValue() != null ? BigDecimal.valueOf(unitPrice.getValue()) : null,
                     discount.getValue() != null ? BigDecimal.valueOf(discount.getValue()) : BigDecimal.ZERO,

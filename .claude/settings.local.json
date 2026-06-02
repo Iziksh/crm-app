@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Command *)",
+      "PowerShell(java *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(\\(Get-Item \"C:\\\\Program Files\\\\Common Files\\\\Oracle\\\\Java\\\\javapath\\\\java.exe\"\\).Target | Select-Object -First 1)",
+      "PowerShell(node --version; npx playwright --version 2>$null)",
+      "PowerShell(docker exec crm-postgres *)",
+      "WebFetch(domain:github.com)",
+      "Bash(cd /tmp)",
+      "Bash(gh api *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "PowerShell(gh api *)",
+      "WebFetch(domain:api.github.com)"
+    ]
+  }
+}
