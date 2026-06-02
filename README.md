@@ -1,4 +1,4 @@
-wha # Spring Boot CRM — OpenCRX Feature Parity Implementation
+# Spring Boot CRM — OpenCRX Feature Parity Implementation
 
 A full-featured CRM built with Spring Boot 3, Vaadin 24, and Spring Security, replicating OpenCRX (`localhost:9090`) as a single executable JAR.
 
