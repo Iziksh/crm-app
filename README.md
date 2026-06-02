@@ -1416,33 +1416,83 @@ Add `SavedSearchesView` (`@Route("saved-searches")`):
 
 ## 10. Running the Application
 
-### Development — H2 In-Memory
+### Prerequisites
+
+| Tool | Version | Notes |
+|---|---|---|
+| Java (JDK) | 17 | Set `JAVA_HOME` to your JDK directory |
+| Maven | via wrapper | No separate install needed — `mvnw.cmd` is included |
+
+**Set JAVA_HOME before any Maven command (PowerShell):**
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17.0.5"   # adjust to your path
+```
+
+**Find your JDK path:**
+```powershell
+Get-ChildItem "C:\Program Files\Java" | Select-Object Name
+```
+
+---
+
+### Development — H2 In-Memory (Windows / PowerShell)
+
+The Maven wrapper must be invoked via Java directly on Windows due to a PATH quirk with `mvnw.cmd`:
+
+```powershell
+$java = "$env:JAVA_HOME\bin\java.exe"
+$jar  = ".\mvn\wrapper\maven-wrapper.jar"
+
+& $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
+    "-Dmaven.multiModuleProjectDirectory=$PWD" `
+    spring-boot:run
+```
+
+Once started (takes ~30–60 s on first run while Vaadin downloads front-end resources):
+
+| URL | Purpose |
+|---|---|
+| http://localhost:9080 | Main UI — log in as `admin` / `admin123` |
+| http://localhost:9080/swagger-ui.html | REST API docs |
+| http://localhost:9080/h2-console | H2 browser (`jdbc:h2:mem:crmdb`) |
+
+> **Shortcut** — if you have `mvn` on your PATH (standalone Maven install):
+> ```powershell
+> mvn spring-boot:run
+> ```
+
+---
+
+### Development — Linux / macOS / WSL
 
 ```bash
-cd crm-app
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk   # adjust to your path
 ./mvnw spring-boot:run
 ```
 
-- App: http://localhost:9080
-- Swagger: http://localhost:9080/swagger-ui.html
-- H2 Console: http://localhost:9080/h2-console (`jdbc:h2:mem:crmdb`)
+---
 
 ### Production — PostgreSQL
 
-```bash
+```powershell
 # 1. Create database
 psql -c "CREATE USER crm WITH PASSWORD 'yourpassword';"
 psql -c "CREATE DATABASE crmdb OWNER crm;"
 
-# 2. Environment variables
-export DATABASE_URL=jdbc:postgresql://localhost:5432/crmdb
-export DATABASE_USER=crm
-export DATABASE_PASSWORD=yourpassword
-export JWT_SECRET=<base64-256-bit-secret>
+# 2. Set environment variables
+$env:DATABASE_URL      = "jdbc:postgresql://localhost:5432/crmdb"
+$env:DATABASE_USER     = "crm"
+$env:DATABASE_PASSWORD = "yourpassword"
+$env:JWT_SECRET        = "<base64-256-bit-secret>"   # see generator below
 
 # 3. Build and run
-./mvnw clean package -DskipTests -Pproduction
-java -jar target/crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
+$java = "$env:JAVA_HOME\bin\java.exe"
+$jar  = ".\mvn\wrapper\maven-wrapper.jar"
+& $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
+    "-Dmaven.multiModuleProjectDirectory=$PWD" `
+    clean package -DskipTests -Pproduction
+
+java -jar target\crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
 ```
 
 ### Generate JWT Secret (PowerShell)
@@ -1486,10 +1536,42 @@ java -jar target/crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
 
 ## 12. Testing
 
+### Run all tests (Windows / PowerShell)
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17.0.5"   # adjust to your path
+$java = "$env:JAVA_HOME\bin\java.exe"
+$jar  = ".\mvn\wrapper\maven-wrapper.jar"
+
+& $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
+    "-Dmaven.multiModuleProjectDirectory=$PWD" `
+    test
+```
+
+### Run a single test class
+
+```powershell
+& $java -cp $jar org.apache.maven.wrapper.MavenWrapperMain `
+    "-Dmaven.multiModuleProjectDirectory=$PWD" `
+    test -Dtest=AccountServiceTest
+```
+
+### Run tests (Linux / macOS / WSL)
+
 ```bash
 ./mvnw test
 ./mvnw test -Dtest=AccountServiceTest
 ```
+
+### Existing test classes
+
+| Class | Type | What it covers |
+|---|---|---|
+| `CrmApplicationTests` | Context load | Spring context starts without errors |
+| `AccountServiceTest` | Unit (Mockito) | `create`, `findById`, `delete` |
+| `ContactRepositoryTest` | `@DataJpaTest` (H2) | `findByEmail`, `findByAccount_Id` |
+
+Test reports are written to `target/surefire-reports/` after each run.
 
 ### Existing Tests
 
