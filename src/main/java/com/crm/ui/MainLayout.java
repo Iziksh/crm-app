@@ -264,6 +264,11 @@ public class MainLayout extends AppLayout {
         }
         nav.addItem(settings);
 
+        SideNavItem hr = new SideNavItem("HR");
+        hr.setPrefixComponent(VaadinIcon.CLOCK.create());
+        hr.addItem(new SideNavItem("Time Clock", TimeClockView.class, VaadinIcon.CLOCK.create()));
+        nav.addItem(hr);
+
         addToDrawer(nav);
     }
 }
