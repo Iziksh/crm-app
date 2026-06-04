@@ -71,6 +71,10 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 | **Calendar** | Meeting / Task Calendar | `CalendarView` month grid + iCalendar export (Phase 17) |
 | **Email** | E-Mail Services | Spring Mail + EMAIL activity type (Phase 18) |
 | **Security** | Email OTP 2-Factor Auth | Caffeine-cached OTPs, HTML email, trusted-device cookie (14 days), `OtpVerificationView` (Phase 19) |
+| **Dashboard** | Sales Charts | CSS horizontal bar charts: Pipeline by Stage, Lead Funnel, Activity Breakdown, Contract Health + Win Rate KPI (Phase 20) |
+| **Time Clock** | Clock In / Clock Out | `AttendanceService.punchIn/punchOut()` + partial unique index dedup + `GET/POST /api/v1/attendance` (Phase 21–23) |
+| **Time Clock** | Israeli Public Holidays | `IsraeliHolidayService` using KosherJava (`com.kosherjava:zmanim`), annual `HolidayRecalculationJob` cron (Phase 24) |
+| **Time Clock** | Monthly Accountant Report | `ExcelReportService` (Apache POI `.xlsx`), `MonthlyReportJob` cron, emailed to accountant on 1st of month (Phase 25) |
 
 ---
 
@@ -173,6 +177,24 @@ crm-app/src/main/java/com/crm/
     ├── SavedSearchesView.java        # BUILT
     ├── SubscriptionsView.java        # BUILT (Phase 15)
     └── ScheduledTasksView.java       # BUILT (Phase 15) — admin task queue with detail dialog + failure reason
+├── timetracking/                     # Time Clock module (Phases 21–25)
+│   ├── entity/
+│   │   ├── Attendance.java           # Phase 22 — clock-in/clock-out sessions
+│   │   └── Holiday.java              # Phase 22 — Israeli public holidays lookup table
+│   ├── repository/
+│   │   ├── AttendanceRepository.java # Phase 22
+│   │   └── HolidayRepository.java    # Phase 22
+│   ├── service/
+│   │   ├── AttendanceService.java    # Phase 23 — punchIn, punchOut, editSession, getMonthlyRecords
+│   │   ├── IsraeliHolidayService.java # Phase 24 — KosherJava Hebrew→Gregorian, generateHolidaysForYear
+│   │   ├── ExcelReportService.java   # Phase 25 — Apache POI .xlsx generation
+│   │   └── ReportEmailService.java   # Phase 25 — MimeMessage attachment send
+│   ├── scheduler/
+│   │   ├── HolidayRecalculationJob.java # Phase 24 — cron Oct 1 02:00
+│   │   └── MonthlyReportJob.java     # Phase 25 — cron 1st of month 06:00 Asia/Jerusalem
+│   └── controller/
+│       ├── AttendanceController.java # Phase 23 — punch-in/out REST endpoints
+│       └── ReportAdminController.java # Phase 25 — manual trigger endpoint
 ```
 
 ---
@@ -2499,6 +2521,706 @@ spring.mail.properties.mail.smtp.starttls.enable=true
 
 ---
 
+### Phase 20 — Dashboard Charts ✅ COMPLETE (built)
+
+Enhanced `DashboardView` with 7 KPI stat cards and 4 CSS horizontal bar charts. No new entities — reads from existing repositories.
+
+#### FE Step 20.1 — Additional repository injections
+
+Inject `OpportunityRepository` and `ContractRepository` into `DashboardView` alongside the existing ones.
+
+#### FE Step 20.2 — KPI cards (7 total)
+
+| Card label | Data source |
+|---|---|
+| Accounts | `accountRepository.count()` |
+| Contacts | `contactRepository.count()` |
+| Open Activities | `activityRepository.countByStatus(ActivityStatus.OPEN)` |
+| New Leads | `leadRepository.countByStatus(LeadStatus.NEW)` |
+| Pipeline Value | `opportunityService.sumPipelineAmount()` formatted as `"USD " + String.format("%,.0f", value)` |
+| Contracts Expiring 30d | `contractService.findExpiringWithin(30).size()` |
+| Win Rate | `wonOpps / (wonOpps + lostOpps)` as `"%.0f%%"` — shows `"—"` when no closed opportunities |
+
+Each card is a `VerticalLayout` with `border-top: 3px solid <accentColor>` and `box-shadow`.
+
+#### FE Step 20.3 — Bar chart cards (4 in a 2×2 grid)
+
+Use a private helper `bar(label, value, max, color)` that returns a `Div` row with:
+- Fixed-width label `Span` (`min-width: 110px`)
+- Track `Div` (`flex: 1`, `background: #f0f4ff`, `border-radius: 4px`, `height: 18px`) containing a fill `Div` sized as `value / max * 100%`
+- Bold count `Span` (`min-width: 32px`, right-aligned)
+
+Wrap bars in `chartCard(title, bars)` — a white `Div` with `box-shadow` and a blue `font-weight: 700` title.
+
+Arrange two `chartCard` Divs side-by-side in `chartRow(left, right)` — a `HorizontalLayout` with `setWidthFull()` and `flex: 1` on each card.
+
+| Chart | Bars |
+|---|---|
+| Pipeline by Stage | Prospecting (#90caf9), Qualification (#42a5f5), Proposal (#1e88e5), Negotiation (#1565c0), Won (#43a047), Lost (#e53935) |
+| Lead Funnel | New, Contacted, Qualified, Won, Lost |
+| Activity Breakdown | Open (#ef6c00), In Progress (#1e88e5), Resolved (#43a047), Closed (#78909c) |
+| Contract Health | Active (#43a047), Draft (#1e88e5), Expired (#e53935), Terminated (#78909c) |
+
+Scale: max value in each chart = 100% bar width; `Math.max(1, ...)` prevents division-by-zero when all counts are 0.
+
+#### Verification Phase 20
+
+1. Open `http://localhost:9080/dashboard`
+2. Confirm 7 KPI cards appear in the top row with colored accent borders
+3. Scroll down — confirm "Sales Overview" heading and 4 chart cards appear below
+4. Create WON and LOST Opportunities → confirm Win Rate card updates on next page load
+5. Verify charts render correctly with no external JavaScript errors in browser console
+
+---
+
+### Phase 21 — Time Clock: Database Schema
+
+Adds two new tables to the PostgreSQL schema: `attendance` (clock-in/clock-out sessions) and `holidays` (Israeli public holidays). This module lives in package `com.crm.timetracking` and is decoupled from the main CRM domain package.
+
+#### Step 21.1 — Maven dependency
+
+Add to `pom.xml` (needed in Phase 24 for KosherJava, add now so later phases compile cleanly):
+```xml
+<dependency>
+    <groupId>com.kosherjava</groupId>
+    <artifactId>zmanim</artifactId>
+    <version>2.5.0</version>
+</dependency>
+<dependency>
+    <groupId>org.apache.poi</groupId>
+    <artifactId>poi-ooxml</artifactId>
+    <version>5.2.5</version>
+</dependency>
+```
+
+#### Step 21.2 — `attendance` table DDL
+
+```sql
+CREATE TABLE attendance (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id          BIGINT                   NOT NULL,
+    start_time       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    end_time         TIMESTAMP WITH TIME ZONE,
+    duration_seconds BIGINT,
+    note             TEXT,
+    source           VARCHAR(32)              NOT NULL DEFAULT 'MANUAL',
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT fk_attendance_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT chk_end_after_start
+        CHECK (end_time IS NULL OR end_time > start_time),
+    CONSTRAINT chk_duration_positive
+        CHECK (duration_seconds IS NULL OR duration_seconds >= 0)
+);
+
+-- Enforces at most one open session per user at the DB level
+CREATE UNIQUE INDEX uq_attendance_active_session
+    ON attendance (user_id) WHERE end_time IS NULL;
+
+CREATE INDEX idx_attendance_user_start ON attendance (user_id, start_time);
+CREATE INDEX idx_attendance_start_time ON attendance (start_time);
+```
+
+The partial unique index `uq_attendance_active_session` is the authoritative guard: a second `INSERT` with `end_time IS NULL` for the same `user_id` raises `DataIntegrityViolationException` even if a race condition slips past the application-layer check.
+
+Auto-update trigger for `updated_at`:
+```sql
+CREATE OR REPLACE FUNCTION trg_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER attendance_set_updated_at
+    BEFORE UPDATE ON attendance
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+```
+
+#### Step 21.3 — `holidays` table DDL
+
+```sql
+CREATE TABLE holidays (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    date         DATE         NOT NULL,
+    name         VARCHAR(255) NOT NULL,
+    type         VARCHAR(32)  NOT NULL DEFAULT 'PUBLIC',
+    country      CHAR(2)      NOT NULL DEFAULT 'IL',
+    year         SMALLINT     NOT NULL,
+    credit_hours NUMERIC(4,2) NOT NULL DEFAULT 0.00,
+    created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_holiday_date_name UNIQUE (date, name, country)
+);
+
+CREATE INDEX idx_holidays_year_country ON holidays (year, country);
+CREATE INDEX idx_holidays_date ON holidays (date);
+```
+
+`credit_hours`: `8.00` for full holiday days, `4.00` for Erev (eve) days. Used by monthly report to credit employees automatically.
+
+#### Step 21.4 — Flyway migrations (production)
+
+Create under `src/main/resources/db/migration/`:
+```
+V2.0.0__create_attendance_table.sql
+V2.0.1__create_holidays_table.sql
+```
+
+Enable Flyway: add `spring.flyway.enabled=true` to `application-postgres.properties`.
+
+With `ddl-auto=update` (development), Hibernate creates the tables automatically on startup. Use Flyway for production.
+
+#### Verification Phase 21
+
+```sql
+-- Run after first startup
+SELECT table_name FROM information_schema.tables
+WHERE table_name IN ('attendance', 'holidays');
+
+SELECT indexname FROM pg_indexes
+WHERE tablename = 'attendance' AND indexname = 'uq_attendance_active_session';
+```
+
+---
+
+### Phase 22 — Time Clock: Data Layer
+
+#### BE Step 22.1 — `Attendance` entity
+
+Create **`com/crm/timetracking/entity/Attendance.java`**:
+```
+@Entity @Table(name = "attendance")
+Fields:
+  Long id
+  @Column(name="user_id", nullable=false) Long userId      // plain FK — no @ManyToOne to stay decoupled
+  @Column(name="start_time", nullable=false, columnDefinition="TIMESTAMP WITH TIME ZONE") OffsetDateTime startTime
+  @Column(name="end_time", columnDefinition="TIMESTAMP WITH TIME ZONE") OffsetDateTime endTime
+  @Column(name="duration_seconds") Long durationSeconds
+  @Column(name="note", columnDefinition="TEXT") String note
+  @Column(name="source", nullable=false, length=32) String source = "MANUAL"
+  @Column(name="created_at", nullable=false, updatable=false, columnDefinition="TIMESTAMP WITH TIME ZONE") OffsetDateTime createdAt
+  @Column(name="updated_at", nullable=false, columnDefinition="TIMESTAMP WITH TIME ZONE") OffsetDateTime updatedAt
+
+@PrePersist: createdAt = updatedAt = OffsetDateTime.now()
+@PreUpdate:  updatedAt = OffsetDateTime.now()
+
+Constructor: Attendance(Long userId, OffsetDateTime startTime, String source)
+```
+
+Setters required: `setEndTime`, `setDurationSeconds`, `setNote`, `setSource`, `setStartTime` (needed for manager edits in Phase 23).
+
+> `userId` is stored as a plain `Long` (not `@ManyToOne`) to keep the `timetracking` package decoupled from `com.crm.domain.entity.User`.
+
+#### BE Step 22.2 — `Holiday` entity
+
+Create **`com/crm/timetracking/entity/Holiday.java`**:
+```
+@Entity @Table(name = "holidays", uniqueConstraints = @UniqueConstraint(name="uq_holiday_date_name", columnNames={"date","name","country"}))
+Fields:
+  Long id
+  @Column(name="date", nullable=false) LocalDate date
+  @Column(name="name", nullable=false, length=255) String name
+  @Column(name="type", nullable=false, length=32) String type = "PUBLIC"
+  @Column(name="country", nullable=false, length=2) String country = "IL"
+  @Column(name="year", nullable=false) Short year                       // set from date.getYear() in constructor
+  @Column(name="credit_hours", nullable=false, precision=4, scale=2) BigDecimal creditHours = BigDecimal.ZERO
+  @Column(name="created_at", nullable=false, updatable=false, columnDefinition="TIMESTAMP WITH TIME ZONE") OffsetDateTime createdAt
+
+@PrePersist: createdAt = OffsetDateTime.now()
+
+Constructor: Holiday(LocalDate date, String name, String type, String country, BigDecimal creditHours)
+  → sets year = (short) date.getYear() inside constructor body
+```
+
+#### BE Step 22.3 — `AttendanceRepository`
+
+Create **`com/crm/timetracking/repository/AttendanceRepository.java`**:
+```java
+@Repository
+public interface AttendanceRepository extends JpaRepository<Attendance, Long> {
+
+    Optional<Attendance> findByUserIdAndEndTimeIsNull(Long userId);
+
+    boolean existsByUserIdAndEndTimeIsNull(Long userId);
+
+    @Query("""
+        SELECT a FROM Attendance a
+        WHERE a.userId = :userId
+          AND a.startTime >= :from AND a.startTime < :to
+        ORDER BY a.startTime ASC
+    """)
+    List<Attendance> findByUserIdAndPeriod(
+        @Param("userId") Long userId,
+        @Param("from") OffsetDateTime from,
+        @Param("to") OffsetDateTime to);
+
+    @Query("""
+        SELECT a FROM Attendance a
+        WHERE a.startTime >= :from AND a.startTime < :to
+        ORDER BY a.userId ASC, a.startTime ASC
+    """)
+    List<Attendance> findAllByPeriod(
+        @Param("from") OffsetDateTime from,
+        @Param("to") OffsetDateTime to);
+}
+```
+
+#### BE Step 22.4 — `HolidayRepository`
+
+Create **`com/crm/timetracking/repository/HolidayRepository.java`**:
+```java
+@Repository
+public interface HolidayRepository extends JpaRepository<Holiday, Long> {
+    List<Holiday> findByYearAndCountry(Short year, String country);
+    boolean existsByDateAndNameAndCountry(LocalDate date, String name, String country);
+    void deleteByYearAndCountry(Short year, String country);
+    List<Holiday> findByDateBetween(LocalDate from, LocalDate to);
+}
+```
+
+#### Verification Phase 22
+
+1. `./mvnw compile` — no errors
+2. Start app — confirm Hibernate creates `attendance` and `holidays` columns matching the DDL
+3. Check H2/psql: `SELECT column_name FROM information_schema.columns WHERE table_name = 'attendance'`
+
+---
+
+### Phase 23 — Time Clock: Core Business Logic
+
+#### BE Step 23.1 — `AttendanceService` — Punch-In
+
+Create **`com/crm/timetracking/service/AttendanceService.java`**:
+
+```java
+@Service
+public class AttendanceService {
+
+    private final AttendanceRepository attendanceRepo;
+
+    public AttendanceService(AttendanceRepository attendanceRepo) {
+        this.attendanceRepo = attendanceRepo;
+    }
+
+    @Transactional
+    public Attendance punchIn(Long userId, String note, String source) {
+        if (attendanceRepo.existsByUserIdAndEndTimeIsNull(userId)) {
+            throw new IllegalStateException(
+                "User " + userId + " already has an active session. Punch out first.");
+        }
+        Attendance session = new Attendance(
+            userId, OffsetDateTime.now(), source != null ? source : "MANUAL");
+        session.setNote(note);
+        return attendanceRepo.save(session);
+    }
+}
+```
+
+**Race-condition guard:** Both an application-level check (returns a clean error message) and the DB partial unique index `uq_attendance_active_session` (raises `DataIntegrityViolationException` for concurrent inserts). Add to the global `@ControllerAdvice`:
+
+```java
+@ExceptionHandler(DataIntegrityViolationException.class)
+public ResponseEntity<ErrorResponse> handleDuplicateSession(DataIntegrityViolationException ex) {
+    if (ex.getMessage() != null && ex.getMessage().contains("uq_attendance_active_session")) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(new ErrorResponse("DUPLICATE_SESSION",
+                "An active session already exists. Punch out first."));
+    }
+    throw ex;
+}
+```
+
+#### BE Step 23.2 — Punch-Out
+
+Add to `AttendanceService`:
+```java
+@Transactional
+public Attendance punchOut(Long userId) {
+    Attendance session = attendanceRepo.findByUserIdAndEndTimeIsNull(userId)
+        .orElseThrow(() -> new IllegalStateException(
+            "No active session found for user " + userId + ". Cannot punch out."));
+    OffsetDateTime now = OffsetDateTime.now();
+    session.setEndTime(now);
+    session.setDurationSeconds(Duration.between(session.getStartTime(), now).getSeconds());
+    return attendanceRepo.save(session);
+}
+```
+
+`Duration.between(...).getSeconds()` returns whole seconds (sub-second precision discarded — sufficient for payroll).
+
+#### BE Step 23.3 — Utility methods
+
+```java
+// Monthly records for one user — boundaries in Asia/Jerusalem timezone
+@Transactional(readOnly = true)
+public List<Attendance> getMonthlyRecords(Long userId, int year, int month) {
+    ZoneId zone = ZoneId.of("Asia/Jerusalem");
+    OffsetDateTime from = YearMonth.of(year, month).atDay(1).atStartOfDay(zone).toOffsetDateTime();
+    return attendanceRepo.findByUserIdAndPeriod(userId, from, from.plusMonths(1));
+}
+
+// Manager override — corrects start/end retroactively and recalculates duration
+@Transactional
+public Attendance editSession(Long sessionId, OffsetDateTime newStart, OffsetDateTime newEnd) {
+    Attendance session = attendanceRepo.findById(sessionId)
+        .orElseThrow(() -> new EntityNotFoundException("Attendance record " + sessionId + " not found"));
+    if (newEnd != null && !newEnd.isAfter(newStart))
+        throw new IllegalArgumentException("end_time must be after start_time");
+    session.setStartTime(newStart);
+    session.setEndTime(newEnd);
+    session.setDurationSeconds(
+        newEnd != null ? Duration.between(newStart, newEnd).getSeconds() : null);
+    return attendanceRepo.save(session);
+}
+```
+
+#### BE Step 23.4 — `AttendanceController`
+
+Create **`com/crm/timetracking/controller/AttendanceController.java`**:
+```
+@RestController @RequestMapping("/api/v1/attendance")
+
+POST   /punch-in
+  Body: { "note": "...", "source": "MANUAL" }
+  → resolves userId from SecurityContext → attendanceService.punchIn(userId, note, source)
+  Returns 201 + Attendance JSON
+
+POST   /punch-out
+  → resolves userId from SecurityContext → attendanceService.punchOut(userId)
+  Returns 200 + Attendance JSON
+
+GET    /active?userId={id}
+  → attendanceRepository.findByUserIdAndEndTimeIsNull(userId)
+  Returns 200 + Attendance JSON or 204 if no active session
+
+GET    /monthly?userId={id}&year={y}&month={m}
+  → attendanceService.getMonthlyRecords(userId, year, month)
+  Returns List<Attendance>
+
+PUT    /{id}
+  @PreAuthorize("hasRole('ADMIN')")
+  Body: { "newStart": "...", "newEnd": "..." }
+  → attendanceService.editSession(id, newStart, newEnd)
+```
+
+> Use `SecurityContextHolder.getContext().getAuthentication().getName()` to get the username, then resolve `userId` via `userRepository.findByUsername(username)`. Users should only be able to punch in/out for themselves — punch endpoints ignore the request body's userId if present.
+
+#### Verification Phase 23
+
+1. `POST /api/v1/attendance/punch-in` → confirm row created with `end_time = NULL`
+2. `POST /api/v1/attendance/punch-in` again → confirm HTTP 409 `DUPLICATE_SESSION`
+3. `POST /api/v1/attendance/punch-out` → confirm `end_time` and `duration_seconds` populated
+4. `POST /api/v1/attendance/punch-out` again → confirm HTTP 500 / `No active session`
+5. `GET /api/v1/attendance/monthly?userId=1&year=2026&month=6` → confirm list returned
+
+---
+
+### Phase 24 — Time Clock: Israeli Holidays
+
+#### BE Step 24.1 — `IsraeliHolidayService`
+
+Create **`com/crm/timetracking/service/IsraeliHolidayService.java`**:
+
+```java
+@Service
+public class IsraeliHolidayService {
+
+    private final HolidayRepository holidayRepo;
+    private static final BigDecimal FULL_DAY = new BigDecimal("8.00");
+    private static final BigDecimal HALF_DAY = new BigDecimal("4.00");
+
+    @Transactional
+    public List<Holiday> generateHolidaysForYear(int gregorianYear) {
+        holidayRepo.deleteByYearAndCountry((short) gregorianYear, "IL");
+        List<Holiday> holidays = new ArrayList<>();
+        LocalDate cursor = LocalDate.of(gregorianYear, 1, 1);
+        LocalDate end    = LocalDate.of(gregorianYear + 1, 1, 1);
+        while (cursor.isBefore(end)) {
+            JewishCalendar jCal = new JewishCalendar(
+                cursor.getYear(), cursor.getMonthValue(), cursor.getDayOfMonth());
+            jCal.setInIsrael(true);  // 1-day Yom Tov (Israeli rule, not diaspora 2-day)
+            String name = resolveHolidayName(jCal);
+            if (name != null) {
+                BigDecimal credit = isErev(jCal) ? HALF_DAY : FULL_DAY;
+                holidays.add(new Holiday(cursor, name, "PUBLIC", "IL", credit));
+            }
+            cursor = cursor.plusDays(1);
+        }
+        return holidayRepo.saveAll(holidays);
+    }
+
+    private String resolveHolidayName(JewishCalendar jCal) {
+        return switch (jCal.getYomTovIndex()) {
+            case JewishCalendar.ROSH_HASHANA       -> "Rosh Hashanah";
+            case JewishCalendar.YOM_KIPPUR         -> "Yom Kippur";
+            case JewishCalendar.SUCCOS             -> "Sukkot";
+            case JewishCalendar.SHEMINI_ATZERES    -> "Shemini Atzeret / Simchat Torah";
+            case JewishCalendar.PESACH             -> "Pesach";
+            case JewishCalendar.SHAVUOS            -> "Shavuot";
+            case JewishCalendar.YOM_HAATZMAUT      -> "Yom Ha'atzmaut";
+            case JewishCalendar.YOM_HAZIKARON      -> "Yom HaZikaron";
+            case JewishCalendar.EREV_ROSH_HASHANA  -> "Erev Rosh Hashanah";
+            case JewishCalendar.EREV_YOM_KIPPUR    -> "Erev Yom Kippur";
+            case JewishCalendar.EREV_PESACH        -> "Erev Pesach";
+            case JewishCalendar.EREV_SUCCOS        -> "Erev Sukkot";
+            case JewishCalendar.CHOL_HAMOED_PESACH -> "Chol HaMoed Pesach";
+            case JewishCalendar.CHOL_HAMOED_SUCCOS -> "Chol HaMoed Sukkot";
+            default -> null;
+        };
+    }
+
+    private boolean isErev(JewishCalendar jCal) {
+        int i = jCal.getYomTovIndex();
+        return i == JewishCalendar.EREV_ROSH_HASHANA || i == JewishCalendar.EREV_YOM_KIPPUR
+            || i == JewishCalendar.EREV_PESACH       || i == JewishCalendar.EREV_SUCCOS;
+    }
+}
+```
+
+`jCal.setInIsrael(true)` is critical: it switches from diaspora 2-day Yom Tov to Israeli 1-day rules so dates are accurate for an Israeli company.
+
+#### BE Step 24.2 — `HolidayRecalculationJob`
+
+Create **`com/crm/timetracking/scheduler/HolidayRecalculationJob.java`**:
+```java
+@Component
+public class HolidayRecalculationJob {
+
+    private final IsraeliHolidayService holidayService;
+
+    // Fires at 02:00 AM on October 1 every year (before the Hebrew new year)
+    // Pre-computes NEXT year's holidays so the table is ready before January
+    @Scheduled(cron = "0 0 2 1 10 *")
+    public void recalculateUpcomingYearHolidays() {
+        int nextYear = Year.now().getValue() + 1;
+        var result = holidayService.generateHolidaysForYear(nextYear);
+        log.info("Persisted {} Israeli holidays for year {}", result.size(), nextYear);
+    }
+}
+```
+
+#### BE Step 24.3 — Bootstrap on first deployment
+
+In `DataInitializer` (or a dedicated `ApplicationRunner` bean), seed holidays for the current and next year on first startup:
+```java
+@Bean
+ApplicationRunner bootstrapHolidays(IsraeliHolidayService svc, HolidayRepository repo) {
+    return args -> {
+        int year = LocalDate.now().getYear();
+        if (repo.findByYearAndCountry((short) year, "IL").isEmpty()) {
+            svc.generateHolidaysForYear(year);
+            svc.generateHolidaysForYear(year + 1);
+            log.info("Bootstrapped Israeli holidays for {} and {}", year, year + 1);
+        }
+    };
+}
+```
+
+#### BE Step 24.4 — Holiday credit helper
+
+Used by `MonthlyReportJob` (Phase 25) to auto-credit employees for public holidays. Israeli workweek is Sunday–Thursday; Friday and Saturday are weekend days:
+```java
+public BigDecimal computeHolidayCredits(int year, int month) {
+    LocalDate from = LocalDate.of(year, month, 1);
+    return holidayRepo.findByDateBetween(from, from.plusMonths(1)).stream()
+        .filter(h -> {
+            DayOfWeek dow = h.getDate().getDayOfWeek();
+            return dow != DayOfWeek.FRIDAY && dow != DayOfWeek.SATURDAY;
+        })
+        .map(Holiday::getCreditHours)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+}
+```
+
+#### BE Step 24.5 — REST endpoints
+
+```
+GET  /api/v1/holidays?year=2026&country=IL
+  → holidayRepository.findByYearAndCountry((short) year, country)
+  → returns List<HolidayResponse>
+
+POST /api/v1/holidays/regenerate?year=2026
+  @PreAuthorize("hasRole('ADMIN')")
+  → israeliHolidayService.generateHolidaysForYear(year)
+  → returns count of persisted holidays
+```
+
+#### Verification Phase 24
+
+1. Start app — confirm bootstrap seeds holidays for current and next year
+2. `GET /api/v1/holidays?year=2026&country=IL` — confirm ~14–16 entries
+3. Spot-check: Rosh Hashanah 2026 falls on 2026-09-11 (cross-check with `https://www.hebcal.com`)
+4. Confirm Erev Rosh Hashanah has `credit_hours = 4.00`
+5. `POST /api/v1/holidays/regenerate?year=2027` (admin JWT) → confirm new rows appear
+
+---
+
+### Phase 25 — Time Clock: Monthly Accountant Report
+
+#### BE Step 25.1 — `ExcelReportService`
+
+Create **`com/crm/timetracking/service/ExcelReportService.java`**. Generates a multi-sheet `.xlsx` workbook using Apache POI:
+
+**Sheets produced:**
+- **Summary** — one row per employee: `Employee | Total Sessions | Total Hours | Total Minutes`
+- **Per-employee sheets** (named after the employee, max 31 chars, special chars replaced with `_`):  
+  Columns: `Date | Clock In | Clock Out | Duration (h:mm) | Note`
+
+**Key implementation details:**
+- All times stored as UTC (`OffsetDateTime`), displayed in `Asia/Jerusalem` timezone using `atZoneSameInstant(IL_ZONE).format(...)`
+- Open sessions (no `end_time`) show `"OPEN"` in the Clock Out column
+- Duration format: `String.format("%d:%02d", hours, minutes)` from `durationSeconds`
+- `sheet.autoSizeColumn(i)` called on all columns
+- Header row styled: bold font, grey fill (`GREY_25_PERCENT`), bottom border
+- Sheet names sanitized: `name.replaceAll("[\\[\\]:*?/\\\\]", "_").substring(0, Math.min(name.length(), 31))`
+
+```java
+public byte[] generateMonthlyReport(
+        List<Attendance> records,
+        Map<Long, String> userNames,
+        String monthLabel) throws IOException {
+
+    try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+        // 1. Create header cell style (bold, grey background)
+        // 2. Group records by userId
+        // 3. Build Summary sheet
+        // 4. For each user: build per-employee detail sheet
+        // 5. Add row to Summary sheet with totals
+        // 6. Serialize to byte[]
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        workbook.write(out);
+        return out.toByteArray();
+    }
+}
+```
+
+See `timeclock.md Phase E.3` for the full method body.
+
+#### BE Step 25.2 — `ReportEmailService`
+
+Create **`com/crm/timetracking/service/ReportEmailService.java`**:
+
+```java
+@Service
+public class ReportEmailService {
+
+    private final JavaMailSender mailSender;
+
+    @Value("${app.reporting.accountant-email}") private String accountantEmail;
+    @Value("${app.reporting.sender-email}")      private String senderEmail;
+
+    public void sendMonthlyReport(byte[] excelBytes, String monthLabel) throws MessagingException {
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setFrom(senderEmail);
+        helper.setTo(accountantEmail);
+        helper.setSubject("Monthly Attendance Report — " + monthLabel);
+        helper.setText("Please find attached the attendance report for " + monthLabel + ".\n\n" +
+                       "This report was generated automatically by the CRM system.");
+        helper.addAttachment(
+            "attendance-report-" + monthLabel + ".xlsx",
+            new ByteArrayResource(excelBytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        mailSender.send(message);
+    }
+}
+```
+
+#### BE Step 25.3 — `MonthlyReportJob`
+
+Create **`com/crm/timetracking/scheduler/MonthlyReportJob.java`**:
+
+```java
+@Component
+public class MonthlyReportJob {
+
+    private static final ZoneId IL_ZONE = ZoneId.of("Asia/Jerusalem");
+
+    private final AttendanceRepository attendanceRepo;
+    private final UserRepository       userRepository;
+    private final ExcelReportService   excelService;
+    private final ReportEmailService   emailService;
+
+    // Fires at 06:00 AM Israel time on the 1st of every month
+    // Processes the PREVIOUS month's data
+    @Scheduled(cron = "0 0 6 1 * *", zone = "Asia/Jerusalem")
+    public void generateAndSendMonthlyReport() {
+        YearMonth lastMonth = YearMonth.now(IL_ZONE).minusMonths(1);
+        OffsetDateTime from  = lastMonth.atDay(1).atStartOfDay(IL_ZONE).toOffsetDateTime();
+        OffsetDateTime to    = from.plusMonths(1);
+        String label = lastMonth.toString(); // "2026-05"
+
+        List<Attendance> records = attendanceRepo.findAllByPeriod(from, to);
+        if (records.isEmpty()) {
+            log.warn("No attendance records for {}. Skipping report.", label);
+            return;
+        }
+
+        // Resolve userId → display name from users table
+        List<Long> userIds = records.stream().map(Attendance::getUserId).distinct().toList();
+        Map<Long, String> names = userRepository.findAllById(userIds).stream()
+            .collect(Collectors.toMap(User::getId, User::getUsername));
+
+        try {
+            byte[] excel = excelService.generateMonthlyReport(records, names, label);
+            emailService.sendMonthlyReport(excel, label);
+            log.info("Monthly attendance report for {} sent successfully.", label);
+        } catch (Exception ex) {
+            log.error("Monthly report job FAILED for {}: {}", label, ex.getMessage(), ex);
+        }
+    }
+}
+```
+
+#### BE Step 25.4 — Required configuration
+
+Add to `application-postgres.properties`:
+```properties
+app.reporting.accountant-email=${ACCOUNTANT_EMAIL:accountant@yourcompany.co.il}
+app.reporting.sender-email=${SENDER_EMAIL:crm-reports@yourcompany.co.il}
+app.reporting.timezone=Asia/Jerusalem
+```
+
+#### BE Step 25.5 — Manual trigger endpoint
+
+Create **`com/crm/timetracking/controller/ReportAdminController.java`**:
+```java
+@RestController
+@RequestMapping("/api/v1/admin/reports")
+@PreAuthorize("hasRole('ADMIN')")
+public class ReportAdminController {
+
+    private final MonthlyReportJob reportJob;
+
+    @PostMapping("/monthly/trigger")
+    public ResponseEntity<String> triggerManually() {
+        reportJob.generateAndSendMonthlyReport();
+        return ResponseEntity.ok("Monthly report job triggered.");
+    }
+}
+```
+
+#### BE Step 25.6 — Enable scheduling
+
+If `@EnableScheduling` is not already on the main class or a config bean, add:
+```java
+@Configuration
+@EnableScheduling
+public class SchedulingConfig { }
+```
+
+`@EnableScheduling` is already present if Phase 15's `SubscriptionHandlerService` uses `@Scheduled`. Verify before adding a duplicate.
+
+#### Verification Phase 25
+
+1. Clock in and out several times with test data
+2. `POST /api/v1/admin/reports/monthly/trigger` (admin JWT) → confirm 200 OK
+3. Check accountant inbox — verify `.xlsx` attachment received
+4. Open the file: confirm a Summary sheet plus one sheet per employee
+5. Verify durations appear as `h:mm`, dates as `yyyy-MM-dd`, times as `HH:mm:ss` in Jerusalem TZ
+6. Leave one session open (no punch-out) → trigger report → confirm that session shows `"OPEN"` in Clock Out column
+
+---
+
 ## 10. Running the Application
 
 ### Prerequisites
@@ -2657,6 +3379,9 @@ java -jar target\crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
 | `spring.mail.port` | `587` | STARTTLS port |
 | `spring.mail.username` | — | Gmail address (also used as `From`) |
 | `spring.mail.password` | — | Gmail App Password (16-char, spaces OK) |
+| `app.reporting.accountant-email` | `accountant@yourcompany.co.il` | Monthly attendance report recipient (Phase 25) |
+| `app.reporting.sender-email` | `crm-reports@yourcompany.co.il` | From address for accountant reports (Phase 25) |
+| `app.reporting.timezone` | `Asia/Jerusalem` | Timezone for report month boundaries and display (Phase 25) |
 
 ### `application-dev.properties`
 
@@ -2782,3 +3507,7 @@ Seeded on first boot by `DataInitializer`:
 | Calendar / Meetings | `/calendar` (month grid + .ics export) | 17 |
 | E-Mail Services | Spring Mail + EMAIL activity type | 18 |
 | Security → 2FA | Email OTP login + trusted device cookie + HTML email | 19 ✅ |
+| Dashboard Charts | CSS bar charts: Pipeline, Lead Funnel, Activity, Contract Health + Win Rate KPI | 20 ✅ |
+| Time Clock → Clock In/Out | `attendance` table + punchIn/punchOut + dedup index | 21–23 |
+| Time Clock → Israeli Holidays | KosherJava + `holidays` table + annual cron recalc | 24 |
+| Time Clock → Accountant Report | Apache POI `.xlsx` + monthly cron + email attachment | 25 |
