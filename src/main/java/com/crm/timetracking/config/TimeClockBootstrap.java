@@ -1,0 +1,30 @@
+package com.crm.timetracking.config;
+
+import com.crm.timetracking.repository.HolidayRepository;
+import com.crm.timetracking.service.IsraeliHolidayService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.time.LocalDate;
+
+@Configuration
+public class TimeClockBootstrap {
+
+    private static final Logger log = LoggerFactory.getLogger(TimeClockBootstrap.class);
+
+    @Bean
+    ApplicationRunner bootstrapHolidays(IsraeliHolidayService svc, HolidayRepository repo) {
+        return args -> {
+            int year = LocalDate.now().getYear();
+            if (repo.findByYearAndCountry((short) year, "IL").isEmpty()) {
+                log.info("Bootstrapping Israeli holidays for {} and {}", year, year + 1);
+                svc.generateHolidaysForYear(year);
+                svc.generateHolidaysForYear(year + 1);
+                log.info("Israeli holiday bootstrap complete.");
+            }
+        };
+    }
+}
