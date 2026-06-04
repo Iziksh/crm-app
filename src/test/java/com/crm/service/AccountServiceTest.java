@@ -23,6 +23,7 @@ import static org.mockito.Mockito.*;
 class AccountServiceTest {
 
     @Mock AccountRepository accountRepository;
+    @Mock CrmEventPublisher eventPublisher;
     @InjectMocks AccountService accountService;
 
     @Test

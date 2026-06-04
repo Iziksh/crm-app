@@ -1,6 +1,6 @@
 package com.crm.controller;
 
-import com.crm.dto.response.NotificationResponse;
+import com.crm.dto.response.AlertResponse;
 import com.crm.service.NotificationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,7 +20,7 @@ public class NotificationController {
     }
 
     @GetMapping
-    public ResponseEntity<List<NotificationResponse>> getUnread(
+    public ResponseEntity<List<AlertResponse>> getUnread(
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(notificationService.getUnread(userDetails.getUsername()));
     }

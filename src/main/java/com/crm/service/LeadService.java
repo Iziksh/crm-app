@@ -36,19 +36,22 @@ public class LeadService {
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
     private final NotificationService notificationService;
+    private final CrmEventPublisher eventPublisher;
 
     public LeadService(LeadRepository leadRepository,
                        OpportunityRepository opportunityRepository,
                        UserRepository userRepository,
                        AccountRepository accountRepository,
                        ContactRepository contactRepository,
-                       NotificationService notificationService) {
+                       NotificationService notificationService,
+                       CrmEventPublisher eventPublisher) {
         this.leadRepository = leadRepository;
         this.opportunityRepository = opportunityRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
         this.notificationService = notificationService;
+        this.eventPublisher = eventPublisher;
     }
 
     public LeadResponse create(LeadRequest request, String createdByUsername) {
@@ -114,11 +117,14 @@ public class LeadService {
 
     public LeadResponse update(Long id, LeadRequest request) {
         Lead lead = getOrThrow(id);
-        return LeadResponse.from(leadRepository.save(mapToEntity(lead, request)));
+        LeadResponse response = LeadResponse.from(leadRepository.save(mapToEntity(lead, request)));
+        eventPublisher.publishUpdated("LEAD", id);
+        return response;
     }
 
     public void delete(Long id) {
         leadRepository.delete(getOrThrow(id));
+        eventPublisher.publishDeleted("LEAD", id);
     }
 
     public OpportunityResponse convert(Long leadId) {

@@ -31,6 +31,11 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public java.util.Optional<String> findEmailByUsername(String username) {
+        return userRepository.findByUsername(username).map(User::getEmail);
+    }
+
+    @Transactional(readOnly = true)
     public List<UserSummaryResponse> findAll() {
         return userRepository.findAll().stream().map(UserSummaryResponse::from).toList();
     }

@@ -66,10 +66,11 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 | **Products** | Product Catalog / Price List | `Product` entity + `ProductsView` (Phase 12) |
 | **Admin** | Managing Users | `UsersView` (admin only) + `UserController` (Phase 13) |
 | **Data** | Import / Export | CSV import (Contacts, Accounts) + CSV export all grids (Phase 14) |
-| **Notify** | Subscribe / Notify Alerts | `Notification` entity + bell in header (Phase 15) |
+| **Notify** | Subscribe / Notify Alerts | `Alert` + `Subscription` + `Topic` entities; `SubscriptionHandlerService` audit-trail scanner; `AlertService.sendAlert()`; bell badge + 3-state mark (NEW/READ/ACCEPTED/EXPIRED); 11 standard Topics; `SubscriptionsView` (Phase 15) |
 | **Documents** | File Attachments | `Attachment` entity, upload on Account/Contact/Activity (Phase 16) |
 | **Calendar** | Meeting / Task Calendar | `CalendarView` month grid + iCalendar export (Phase 17) |
 | **Email** | E-Mail Services | Spring Mail + EMAIL activity type (Phase 18) |
+| **Security** | Email OTP 2-Factor Auth | Caffeine-cached OTPs, HTML email, trusted-device cookie (14 days), `OtpVerificationView` (Phase 19) |
 
 ---
 
@@ -96,7 +97,8 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 crm-app/src/main/java/com/crm/
 ├── CrmApplication.java
 ├── config/
-│   ├── DataInitializer.java          # Seeds admin user + Default workspace
+│   ├── AsyncConfig.java              # @EnableAsync for email sending
+│   ├── DataInitializer.java          # Seeds admin user (email synced from app.admin.email) + Default workspace + Topics
 │   ├── JwtConfig.java
 │   └── SecurityConfig.java
 ├── domain/
@@ -115,7 +117,12 @@ crm-app/src/main/java/com/crm/
 │   │   ├── SalesOrderLineItem.java   # BUILT
 │   │   ├── Contract.java             # BUILT
 │   │   ├── SavedSearch.java          # BUILT
-│   │   └── Workspace.java            # BUILT
+│   │   ├── Workspace.java            # BUILT
+│   │   ├── Alert.java                # BUILT (Phase 15)
+│   │   ├── Subscription.java         # BUILT (Phase 15)
+│   │   ├── Topic.java                # BUILT (Phase 15)
+│   │   ├── AuditLog.java             # BUILT (Phase 15)
+│   │   └── TrustedDevice.java        # BUILT (Phase 19) — hashed device-trust tokens
 │   └── enums/
 │       ├── AccountType.java          # BUILT
 │       ├── ContactStatus.java        # BUILT
@@ -128,17 +135,26 @@ crm-app/src/main/java/com/crm/
 │       ├── OpportunityStage.java     # BUILT
 │       ├── QuoteStatus.java          # BUILT
 │       ├── SalesOrderStatus.java     # BUILT
-│       └── ContractStatus.java       # BUILT
+│       ├── ContractStatus.java       # BUILT
+│       ├── AlertState.java           # BUILT (Phase 15)
+│       ├── AlertImportance.java      # BUILT (Phase 15)
+│       └── SubscriptionEventType.java # BUILT (Phase 15)
 ├── dto/
 │   ├── request/                      # BUILT: Login, Register, Account, Contact
 │   └── response/                     # BUILT: Auth, Account, Contact
-├── repository/                       # BUILT: User, Account, Contact
-├── service/                          # BUILT: Jwt, User, Account, Contact
+├── repository/                       # BUILT: User, Account, Contact, TrustedDevice
+├── service/
+│   ├── AlertService.java             # BUILT — sendAlertFull uses REQUIRES_NEW transaction
+│   ├── DeviceTrustService.java       # BUILT (Phase 19) — SHA-256 hashed cookie tokens, 14-day expiry, nightly cleanup
+│   ├── EmailService.java             # BUILT (Phase 19) — async HTML OTP emails via JavaMailSender
+│   ├── OtpService.java               # BUILT (Phase 19) — Caffeine-cached 6-digit codes, 5-min TTL, single-use
+│   └── ...                           # User, Account, Contact, Jwt, etc.
 ├── controller/                       # BUILT: Auth, Account, Contact
 ├── security/                         # BUILT: JwtFilter, UserDetailsServiceImpl
 ├── exception/                        # BUILT: GlobalHandler, ErrorResponse, exceptions
 └── ui/
-    ├── LoginView.java                # BUILT
+    ├── LoginView.java                # BUILT (Phase 19) — Vaadin form, checks trusted-device cookie before OTP
+    ├── OtpVerificationView.java      # BUILT (Phase 19) — @AnonymousAllowed, resend, trust-device checkbox
     ├── MainLayout.java               # BUILT — extend nav each phase
     ├── DashboardView.java            # BUILT — extend KPI cards each phase
     ├── AccountsView.java             # BUILT
@@ -154,7 +170,9 @@ crm-app/src/main/java/com/crm/
     ├── ContractsView.java            # BUILT
     ├── ForecastView.java             # BUILT
     ├── WorkspacesView.java           # BUILT
-    └── SavedSearchesView.java        # BUILT
+    ├── SavedSearchesView.java        # BUILT
+    ├── SubscriptionsView.java        # BUILT (Phase 15)
+    └── ScheduledTasksView.java       # BUILT (Phase 15) — admin task queue with detail dialog + failure reason
 ```
 
 ---
@@ -165,6 +183,10 @@ crm-app/src/main/java/com/crm/
 
 #### `users` — `user_roles (user_id, role)`
 `id`, `username` (UNIQUE), `email` (UNIQUE), `password` (BCrypt), `enabled`, `created_at`, `updated_at`
+
+#### `trusted_devices`
+`id`, `user_email` (indexed), `token_hash` VARCHAR(64) UNIQUE (SHA-256 of raw cookie token), `expires_at` (indexed), `created_at`
+— Raw token stored only in `DEVICE_TRUST` HttpOnly cookie; only the hash is persisted. Cleaned up nightly at 03:00.
 
 #### `accounts`
 `id`, `name` (NOT NULL), `industry`, `website`, `phone`, `email` (UNIQUE), `address`, `type` (AccountType), `notes` (TEXT), `created_at`, `updated_at`
@@ -1747,76 +1769,411 @@ Add "Import CSV" button to `ContactsView` and `AccountsView` toolbar:
 
 ---
 
-### Phase 15 — In-App Notifications ✅ COMPLETE (built)
+### Phase 15 — Subscribe / Notify & In-App Alerts ✅ COMPLETE (built)
 
-OpenCRX's Subscribe/Notify system creates alerts when subscribed entities change. Adds a `Notification` entity, a notification bell in the header, and background event triggers on key CRM actions.
+OpenCRX's Subscribe/Notify system is built around three core entities — **Alert**, **Subscription**, and **Topic** — backed by a `SubscriptionHandlerServlet` that scans an audit trail for object changes and fires matching workflows. This phase replicates that model faithfully.
 
-#### BE Step 15.1 — Notification Entity
+---
 
-**`domain/entity/Notification.java`**
+#### OpenCRX Source Mapping
+
+| OpenCRX Class / Concept | Spring Boot Equivalent |
+|---|---|
+| `Alert` entity (in `UserHome`) | `Alert` entity |
+| `AlertState` enum (`NEW`, `READ`, `ACCEPTED`, `EXPIRED`) | `AlertState` Java enum |
+| `Subscription` entity (in `UserHome`) | `Subscription` entity |
+| `Topic` entity (system-level, 15 standard topics) | `Topic` entity + `DataInitializer` seed |
+| `SubscriptionHandlerServlet` — polls audit trail | `SubscriptionHandlerService` `@Scheduled` bean |
+| `WorkflowHandlerServlet` — dispatches async workflows | `NotificationDispatchService` |
+| `SendAlert` synchronous workflow | `AlertService.sendAlert()` |
+| `SendMailNotificationWorkflow` async workflow | `EmailNotificationService.sendMailNotification()` |
+| `Base.sendAlert(target, toUsers, name, desc, importance, resendDelay, reference)` | `AlertService.sendAlert(...)` |
+| `UserHomes.markAsRead / markAsAccepted / markAsNew` | `AlertService.markAsRead / markAsAccepted / markAsNew` |
+| `UserHomes.refreshItems()` — expires stale alerts | `AlertService.expireStaleAlerts()` `@Scheduled` |
+| `subscriptionMatches(topic, eventType, filters 0–4)` | `SubscriptionMatcherService.matches(...)` |
+
+---
+
+#### BE Step 15.1 — Enums
+
+**`AlertState.java`**
+```java
+public enum AlertState {
+    NEW,       // initial — shown in bell badge
+    READ,      // user opened the alert
+    ACCEPTED,  // user explicitly acknowledged
+    EXPIRED    // auto-set: READ alerts > 3 months old, or invalid reference > 1 month
+}
 ```
-@Entity @Table("notifications")
+
+**`AlertImportance.java`**
+```java
+public enum AlertImportance {
+    LOW, NORMAL, HIGH, URGENT
+}
+```
+
+**`SubscriptionEventType.java`**
+```java
+public enum SubscriptionEventType {
+    OBJECT_CREATION,    // eventType value 1
+    OBJECT_REPLACEMENT, // eventType value 3
+    OBJECT_REMOVAL,     // eventType value 4
+    TIMER               // timer-triggered
+}
+```
+
+---
+
+#### BE Step 15.2 — Alert Entity
+
+**`domain/entity/Alert.java`**
+```
+@Entity @Table("alerts")
 Fields:
   Long id
-  @ManyToOne(fetch=LAZY) @JoinColumn("user_id") User user
-  @Column(nullable=false) String message
-  String entityType   // "LEAD", "ACTIVITY", "OPPORTUNITY", etc.
-  Long entityId
-  boolean read = false
+  @ManyToOne(fetch=LAZY) @JoinColumn("user_id") User user           // owner (private)
+  @Column(nullable=false) String name                                // alert title (default "--")
+  @Column(columnDefinition="TEXT") String description               // HTML body
+  @Enumerated(EnumType.STRING)
+  AlertState alertState = AlertState.NEW
+  @Enumerated(EnumType.STRING)
+  AlertImportance importance = AlertImportance.NORMAL
+  String entityType    // "LEAD","ACTIVITY","OPPORTUNITY","QUOTE","SALES_ORDER",
+                       // "CONTRACT","ACCOUNT","CONTACT","PRODUCT","ACTIVITY_NOTE"
+  Long entityId        // FK to the triggering record (nullable)
+  @Column(nullable=false) LocalDateTime resendCutoffAt  // now() + resendDelaySeconds
+                       // new alert suppressed if one exists for same (user,entityType,entityId)
+                       // within this window — mirrors OpenCRX resendDelayInSeconds (default 60 s)
   @CreatedDate @Column(updatable=false) LocalDateTime createdAt
 ```
 
-#### BE Step 15.2 — Repository
+> **OpenCRX parity notes:**
+> - `accessLevelDelete` and `accessLevelUpdate` are both `PRIVATE` in OpenCRX — only the owning user can read, update, or delete their own alerts.
+> - `reference` in OpenCRX is the XRI path of the triggering object; here it is captured as `entityType` + `entityId`.
+> - Deduplication: before inserting, query for an existing alert with the same `(user, entityType, entityId)` where `resendCutoffAt > now()`. If found, skip creation.
+
+---
+
+#### BE Step 15.3 — Subscription Entity
+
+Models the OpenCRX `Subscription` object that lives on a `UserHome`. Each user manages their own subscriptions.
+
+**`domain/entity/Subscription.java`**
+```
+@Entity @Table("subscriptions")
+Fields:
+  Long id
+  @Column(nullable=false) String name
+  @Column(columnDefinition="TEXT") String description
+  boolean active = true
+  @ManyToOne(fetch=LAZY) @JoinColumn("user_id") User user          // subscription owner
+  @ManyToOne(fetch=LAZY) @JoinColumn("topic_id") Topic topic
+
+  // Event type filter — empty collection means "all types"
+  @ElementCollection
+  @CollectionTable(name="subscription_event_types")
+  @Enumerated(EnumType.STRING)
+  List<SubscriptionEventType> eventTypes = new ArrayList<>()
+
+  // Up to 5 named attribute filters (AND across names, OR within values)
+  // Value prefixed with "!" means negation (OpenCRX convention)
+  String filterName0; String filterValue0   // e.g. filterName0="assignedTo", filterValue0="admin"
+  String filterName1; String filterValue1
+  String filterName2; String filterValue2
+  String filterName3; String filterValue3
+  String filterName4; String filterValue4
+
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+  @LastModifiedDate LocalDateTime updatedAt
+```
+
+---
+
+#### BE Step 15.4 — Topic Entity
+
+System-level; seeded once by `DataInitializer`. Mirrors OpenCRX's 15 standard topics.
+
+**`domain/entity/Topic.java`**
+```
+@Entity @Table("topics")
+Fields:
+  Long id
+  @Column(nullable=false, unique=true) String name
+  @Column(nullable=false) String entityType   // entity class the topic watches
+  // sendAlertEnabled → creates in-app Alert via AlertService.sendAlert()
+  boolean sendAlertEnabled = true
+  // sendMailEnabled → sends email via EmailNotificationService (requires mail config)
+  boolean sendMailEnabled = false
+  @CreatedDate @Column(updatable=false) LocalDateTime createdAt
+```
+
+**Standard topics seeded in `DataInitializer`** (mirrors OpenCRX `Workflows.initTopic()`):
+
+| Topic Name | `entityType` | Default Actions |
+|---|---|---|
+| Account Modifications | `ACCOUNT` | SendAlert |
+| Activity Modifications | `ACTIVITY` | SendAlert |
+| Activity Follow Up Modifications | `ACTIVITY_NOTE` | SendAlert |
+| Lead Modifications | `LEAD` | SendAlert |
+| Opportunity Modifications | `OPPORTUNITY` | SendAlert |
+| Quote Modifications | `QUOTE` | SendAlert |
+| Sales Order Modifications | `SALES_ORDER` | SendAlert |
+| Contract Modifications | `CONTRACT` | SendAlert |
+| Product Modifications | `PRODUCT` | SendAlert |
+| Contact Modifications | `CONTACT` | SendAlert |
+| Alert Modifications | `ALERT` | SendMailNotification (email on new alert) |
+
+---
+
+#### BE Step 15.5 — Repositories
 
 ```java
-// NotificationRepository extends JpaRepository<Notification, Long>
-// List<Notification> findByUser_IdAndReadFalseOrderByCreatedAtDesc(Long userId)
-// long countByUser_IdAndReadFalse(Long userId)
-// Page<Notification> findByUser_IdOrderByCreatedAtDesc(Long userId, Pageable pageable)
+// AlertRepository extends JpaRepository<Alert, Long>
+// List<Alert> findByUser_IdAndAlertStateInOrderByCreatedAtDesc(Long userId, List<AlertState> states)
+// long countByUser_IdAndAlertState(Long userId, AlertState state)
+// Page<Alert> findByUser_IdOrderByCreatedAtDesc(Long userId, Pageable pageable)
+// List<Alert> findByUser_IdAndEntityTypeAndEntityId(Long userId, String entityType, Long entityId)
+// List<Alert> findByAlertStateAndCreatedAtBefore(AlertState state, LocalDateTime cutoff) // for expiry
+
+// SubscriptionRepository extends JpaRepository<Subscription, Long>
+// List<Subscription> findByUser_IdAndActiveTrue(Long userId)
+// List<Subscription> findByTopic_IdAndActiveTrue(Long topicId)
+
+// TopicRepository extends JpaRepository<Topic, Long>
+// Optional<Topic> findByEntityType(String entityType)
+// Optional<Topic> findByName(String name)
 ```
 
-#### BE Step 15.3 — NotificationService
+---
 
-**`NotificationService`** `@Service @Transactional`:
-- `void notify(Long userId, String message, String entityType, Long entityId)` — creates a Notification row
-- `List<NotificationResponse> getUnread(String username)`
-- `long countUnread(String username)`
-- `void markRead(Long notificationId)`
-- `void markAllRead(String username)`
+#### BE Step 15.6 — DTOs
 
-#### BE Step 15.4 — Wire notifications to CRM events
+**`AlertResponse`** record: `Long id`, `String name`, `String description`, `AlertState alertState`, `AlertImportance importance`, `String entityType`, `Long entityId`, `LocalDateTime createdAt`
+— `from(Alert a)`
 
-Inject `NotificationService` into:
-- **`LeadService.create()`** — notify the `assignedTo` user: "New lead assigned: {title}"
-- **`ActivityService.create()`** — notify the `assignedTo` user: "New activity assigned: {title}"
-- **`OpportunityService.update()`** — when `stage` changes to `WON`, notify `assignedTo`: "Opportunity WON: {name}"
-- **`ActivityService.resolve()`** — notify `createdBy`: "Activity resolved: {title}"
+**`SubscriptionRequest`** record: `@NotBlank String name`, `String description`, `boolean active`, `Long topicId`, `List<SubscriptionEventType> eventTypes`, `String filterName0`, `String filterValue0`, `String filterName1`, `String filterValue1`, `String filterName2`, `String filterValue2`, `String filterName3`, `String filterValue3`, `String filterName4`, `String filterValue4`
 
-#### BE Step 15.5 — NotificationController
+**`SubscriptionResponse`** record: `Long id`, `String name`, `String description`, `boolean active`, `String topicName`, `String entityType`, `List<SubscriptionEventType> eventTypes`, `LocalDateTime createdAt`
 
-**`NotificationController`** `@RestController @RequestMapping("/api/v1/notifications")`:
+**`TopicResponse`** record: `Long id`, `String name`, `String entityType`, `boolean sendAlertEnabled`, `boolean sendMailEnabled`
+
+---
+
+#### BE Step 15.7 — AlertService
+
+**`AlertService`** `@Service @Transactional`:
+
+```java
+// Mirrors Base.sendAlert() — deduplication via resendCutoffAt window
+List<AlertResponse> sendAlert(
+    String toUsernames,          // comma/semicolon-delimited (mirrors OpenCRX toUsers)
+    String name,                 // alert title; defaults to "--" if blank
+    String description,          // HTML body (Bootstrap-styled like OpenCRX Notifications.getNotificationText())
+    AlertImportance importance,  // defaults to NORMAL
+    int resendDelaySeconds,      // default 60; suppress duplicate within window
+    String entityType,           // triggering entity class
+    Long entityId                // triggering entity PK
+)
+
+AlertResponse findById(Long id) @Transactional(readOnly=true)
+Page<AlertResponse> findAll(Long userId, List<AlertState> states, Pageable) @Transactional(readOnly=true)
+long countUnread(Long userId)   // counts alertState = NEW @Transactional(readOnly=true)
+
+// Mirrors UserHomes.markAsRead / markAsAccepted / markAsNew
+AlertResponse markAsRead(Long alertId)
+AlertResponse markAsAccepted(Long alertId)
+AlertResponse markAsNew(Long alertId)
+void markAllRead(Long userId)
+
+// Mirrors UserHomes.refreshItems() — run on @Scheduled(fixedDelay=3_600_000)
+void expireStaleAlerts()
+// Logic:
+//   • alertState = READ  AND createdAt < now() - 3 months  →  EXPIRED
+//   • alertState = NEW   AND entityId no longer exists      →  READ after 1 month
+//   • deduplication: skip new alert if (user,entityType,entityId) alert exists within resendCutoffAt
 ```
-GET    /          → getUnread (current user from SecurityContext)
-GET    /count     → countUnread (returns Long)
-PATCH  /{id}/read → markRead
-PATCH  /read-all  → markAllRead
+
+---
+
+#### BE Step 15.8 — SubscriptionMatcherService
+
+Mirrors `UserHomes.subscriptionMatches()` — called by `SubscriptionHandlerService` for each audit event.
+
+**`SubscriptionMatcherService`** `@Service`:
+
+```java
+boolean matches(Subscription sub, String entityType, SubscriptionEventType eventType, Map<String,String> entityAttributes) {
+    // 1. topicMatches: sub.topic.entityType == entityType
+    // 2. eventTypeMatches: sub.eventTypes is empty OR eventType in sub.eventTypes
+    // 3. filterMatches: for each configured filterNameN/filterValueN pair (0..4):
+    //      entityAttributes.get(filterNameN) matches filterValueN
+    //      multiple values within one filter → OR logic
+    //      multiple filter slots → AND logic
+    //      value prefixed with "!" → negation
+    return topicMatches && eventTypeMatches && filterMatches;
+}
 ```
 
-#### FE Step 15.6 — Notification bell in header
+---
+
+#### BE Step 15.9 — SubscriptionHandlerService
+
+Mirrors OpenCRX `SubscriptionHandlerServlet` — scans audit/change records and fires alerts.
+
+**`SubscriptionHandlerService`** `@Service`:
+
+```java
+// @Scheduled(fixedDelay=30_000)  — every 30 s (OpenCRX default cycles continuously)
+void handleSubscriptions() {
+    // 1. Pull unprocessed AuditLog entries (batch size 50, same as OpenCRX BATCH_SIZE)
+    // 2. For each entry: determine entityType + eventType + entityAttributes
+    // 3. Find active Subscriptions where topic.entityType matches
+    // 4. For each Subscription: call subscriptionMatcherService.matches(...)
+    // 5. On match: call alertService.sendAlert(sub.user.username, ..., entityType, entityId)
+    // 6. If topic.sendMailEnabled: call emailNotificationService.sendMailNotification(...)
+    // 7. Mark AuditLog entry as processed
+    // User-enabled guard: skip subscriptions for disabled users
+}
+```
+
+**`AuditLog`** entity (lightweight — no UI needed):
+```
+@Entity @Table("audit_log")
+  Long id
+  String entityType
+  Long entityId
+  @Enumerated(EnumType.STRING) SubscriptionEventType eventType
+  boolean processed = false
+  @CreatedDate LocalDateTime createdAt
+```
+
+Populate `AuditLog` from each service's `create()`, `update()`, and `delete()` methods by saving an `AuditLog` row at the end of the transaction.
+
+---
+
+#### BE Step 15.10 — EmailNotificationService
+
+Mirrors OpenCRX `SendMailNotificationWorkflow`. Produces HTML email matching `Notifications.getNotificationText()`.
+
+**`EmailNotificationService`** `@Service`:
+
+```java
+// @Value("${app.mail.enabled:false}") guard — same as Phase 18 EmailService
+void sendMailNotification(User toUser, Alert alert) {
+    // Subject: configurable prefix + alert.name
+    //   e.g. "[CRM Alert] New lead assigned: Demo Corp"
+    // Body (HTML, Bootstrap 3.3.6 styled):
+    //   For ACTIVITY / ACTIVITY_NOTE alerts — include:
+    //     • Reporting contact name
+    //     • Handler / assigned-to username
+    //     • Priority, status
+    //     • Scheduled start / due date, actual end
+    //     • Meeting attendees with acceptance status (+/−/?)
+    //   For all other entity types:
+    //     • Alert name + description
+    //     • Entity type + entity ID
+    //     • Trigger timestamp
+    // Sent asynchronously: @Async + try/catch(MailException) — mail failure never breaks main tx
+}
+```
+
+---
+
+#### BE Step 15.11 — Controllers
+
+**`AlertController`** `@RestController @RequestMapping("/api/v1/alerts")`:
+```
+GET    /                → list for current user (?state=NEW&state=READ, paginated)
+GET    /count           → countUnread (NEW alerts only)
+GET    /{id}            → findById
+PATCH  /{id}/read       → markAsRead
+PATCH  /{id}/accepted   → markAsAccepted
+PATCH  /{id}/new        → markAsNew
+PATCH  /read-all        → markAllRead (current user)
+DELETE /{id}            → delete (204, own alerts only)
+```
+
+**`SubscriptionController`** `@RestController @RequestMapping("/api/v1/subscriptions")`:
+```
+POST   /     → create (for current user)
+GET    /     → list for current user
+GET    /{id} → findById
+PUT    /{id} → update
+DELETE /{id} → delete (204)
+```
+
+**`TopicController`** `@RestController @RequestMapping("/api/v1/topics")`:
+```
+GET    /     → list all topics (read-only for regular users)
+GET    /{id} → findById
+PUT    /{id} → update sendAlertEnabled / sendMailEnabled (ADMIN only)
+```
+
+---
+
+#### BE Step 15.12 — Wire AuditLog to all services
+
+Add at the end of every service `create()`, `update()`, and `delete()` method:
+
+```java
+auditLogRepository.save(new AuditLog(entityType, entity.getId(), eventType));
+```
+
+Affected services: `AccountService`, `ContactService`, `ActivityService`, `LeadService`, `OpportunityService`, `QuoteService`, `SalesOrderService`, `ContractService`, `ProductService`, `ActivityNoteService` (via `ActivityService.addNote`).
+
+---
+
+#### FE Step 15.13 — Notification bell in header
 
 In **`MainLayout.createHeader()`**:
-- Add a `Button` with `VaadinIcon.BELL` and a `Badge` showing unread count
-- On click, open a `Dialog` listing unread notifications (message, entity type, time ago)
-- Each notification has a "Mark read" button
-- "Mark all read" button at the top of the dialog
-- Poll for new count every 60 s using `UI.getCurrent().addPollListener()` (set `ui.setPollInterval(60000)`)
+- `Button` with `VaadinIcon.BELL` + `Badge` showing `alertService.countUnread(userId)` (NEW alerts only)
+- Poll every 60 s: `ui.setPollInterval(60_000)` with `addPollListener`
+- Click → `Dialog` "Alerts" listing NEW + READ alerts, most recent first:
+  - Each row: alert name, entity type badge, "time ago" label, importance indicator
+  - Per-row buttons: **Mark Read** / **Mark Accepted** / **Mark New** (mirrors OpenCRX three-state model)
+  - **Mark All Read** button at dialog top
+- Badge disappears when `countUnread == 0`
+
+---
+
+#### FE Step 15.14 — Subscriptions management view
+
+**`ui/SubscriptionsView.java`**
+```
+@Route("subscriptions") @PageTitle("Subscriptions | CRM") @PermitAll
+extends VerticalLayout
+Grid<SubscriptionResponse>
+  Columns: name, topicName (entity type), active (badge), eventTypes, createdAt, Actions
+Toolbar: "New Subscription" Button
+Dialog fields:
+  TextField name, TextArea description
+  Toggle active
+  ComboBox<TopicResponse> topic (shows all 11 standard topics by name)
+  CheckboxGroup<SubscriptionEventType> eventTypes ("All" if none selected)
+  FormLayout 5×2 for filterName0/filterValue0 … filterName4/filterValue4 (optional)
+    — label: "Filter N: field name" + "Filter N: value (prefix ! to negate)"
+```
+
+Add to **`MainLayout.createDrawer()`** under Settings:
+```java
+settings.addItem(new SideNavItem("Subscriptions", SubscriptionsView.class, VaadinIcon.BELL.create()));
+```
+
+---
 
 #### Verification Phase 15
 
-1. Create a lead assigned to admin — check bell shows badge with count 1
-2. Open notification panel — confirm lead notification appears
-3. Mark as read — badge disappears
-4. Win an opportunity — confirm notification appears for the assigned user
+1. On first boot: confirm `DataInitializer` seeds 11 Topic rows in DB
+2. Create a Lead assigned to admin — within 30 s, confirm an `Alert` row is created for admin with `alertState = NEW`
+3. Check bell badge shows count 1 → open panel → lead alert appears
+4. Click **Mark Read** — badge disappears; `alertState` changes to `READ`
+5. Click **Mark Accepted** — `alertState` changes to `ACCEPTED`
+6. Create a Subscription for `Opportunity Modifications` topic with `eventType = OBJECT_REPLACEMENT`; set `filterName0 = stage`, `filterValue0 = WON` → update an Opportunity to stage WON — confirm only that subscription fires
+7. Set `filterValue0 = !LOST` — update Opportunity to stage PROPOSAL — confirm alert fires; update to LOST — confirm no alert
+8. Run `alertService.expireStaleAlerts()` — confirm READ alerts older than 3 months become EXPIRED and no longer appear in bell count
+9. Confirm `AuditLog` table grows one row per create/update/delete event across all entity types
+10. Enable mail (`app.mail.enabled=true`) — create a Lead → verify email arrives via `Alert Modifications` topic's `sendMailEnabled` flag
 
 ---
 
@@ -2052,6 +2409,96 @@ In **`ActivitiesView`**, when the type `ComboBox` value is `EMAIL`:
 
 ---
 
+### Phase 19 — Email OTP 2-Factor Authentication ✅ COMPLETE (built)
+
+Adds mandatory email OTP on every login, optional trusted-device cookie to skip OTP for repeat logins, and HTML-formatted OTP emails.
+
+#### New dependencies (`pom.xml`)
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
+<dependency>
+    <groupId>com.github.ben-manes.caffeine</groupId>
+    <artifactId>caffeine</artifactId>
+</dependency>
+```
+
+#### New entities
+
+**`TrustedDevice`** — `trusted_devices` table  
+`id`, `userEmail` (indexed), `tokenHash` VARCHAR(64) UNIQUE, `expiresAt` (indexed), `createdAt`  
+Raw UUID token in cookie; only SHA-256 hash stored in DB.
+
+#### New services
+
+**`OtpService`** — Generates and validates 6-digit OTPs using Caffeine in-memory cache (TTL = `otp.expiry-minutes`, default 5). Codes are single-use: invalidated on successful validation.
+
+**`EmailService`** — Sends HTML OTP emails via `JavaMailSender` on a Spring `@Async` thread. Uses `MimeMessage` + `MimeMessageHelper`. From address must match the authenticated SMTP account (`spring.mail.username`).
+
+**`DeviceTrustService`** — Creates and validates `DEVICE_TRUST` HttpOnly cookies:
+- `createTrustToken(email)` → UUID raw token saved to cookie, SHA-256 hash persisted in DB with expiry
+- `isTokenValid(rawToken, email)` → verifies hash exists, email matches, not expired
+- `@Scheduled(cron = "0 0 3 * * *")` nightly cleanup of expired rows
+
+**`AsyncConfig`** — `@Configuration @EnableAsync` to enable `@Async` on `EmailService.sendOtp()`.
+
+#### Updated security flow
+
+**`LoginView`** (Vaadin form, `@AnonymousAllowed`):
+1. Authenticate username + password via `AuthenticationManager`
+2. Look up user email via `UserService.findEmailByUsername()`
+3. Read `DEVICE_TRUST` cookie → if valid, call `completeAuthentication()` and navigate to `/`
+4. Otherwise: generate OTP, send HTML email, store `2fa_username` + `2fa_email` in `VaadinSession`, navigate to `verify-otp`
+
+**`OtpVerificationView`** (`@Route("verify-otp")`, `@AnonymousAllowed`):
+- `beforeEnter()`: reroutes to login if no `2fa_username` in session
+- Verify button: validates OTP → completes Spring Security authentication programmatically
+- "Remember this device" checkbox: creates trust token + writes HttpOnly cookie (`maxAge = days × 86400`)
+- Resend button: generates new OTP and sends email (green confirmation shown)
+- Masked email hint: `i*****h@gmail.com`
+
+#### Admin email sync (`DataInitializer`)
+
+On every startup, if `app.admin.email` differs from the stored admin email:
+1. Any other user owning that email is moved to `username@crm.internal`
+2. Admin's email is updated to `app.admin.email`
+
+This resolves the chicken-and-egg problem (need email to receive OTP, need OTP to log in and set email).
+
+#### Bug fix — `AlertService.sendAlertFull` transaction isolation
+
+`sendAlertFull` is annotated with `@Transactional(propagation = Propagation.REQUIRES_NEW)` so that a DB constraint failure inside alert creation (e.g. duplicate dedup key) rolls back only the alert's transaction and does not poison the caller's transaction in `ScheduledTaskService.executeWithReEvaluation()`. Without this, the task's FAILED status would never be persisted.
+
+#### Required `application.properties` settings
+
+```properties
+app.admin.email=your@email.com
+otp.expiry-minutes=5
+otp.length=6
+device-trust.days=14
+device-trust.cookie-name=DEVICE_TRUST
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=your@gmail.com
+spring.mail.password=xxxx xxxx xxxx xxxx   # Gmail App Password
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+```
+
+#### Verification Phase 19
+
+1. Start app — confirm no startup errors; check logs that admin email was synced
+2. Go to `http://localhost:9080/login` — log in with `admin / admin123`
+3. Check inbox for HTML OTP email with large blue code box
+4. Enter code → confirm redirect to dashboard
+5. Log out and log in again — check "Remember this device" → enter code → on next login, OTP step is skipped
+6. Wait 14 days (or manually delete from `trusted_devices`) → OTP required again
+
+---
+
 ## 10. Running the Application
 
 ### Prerequisites
@@ -2201,6 +2648,15 @@ java -jar target\crm-app-1.0.0-SNAPSHOT.jar --spring.profiles.active=prod
 | `spring.profiles.active` | `postgres` | `dev` for H2, `prod` for external PostgreSQL |
 | `app.jwt.expiration-ms` | `86400000` | 24 hours |
 | `spring.jpa.open-in-view` | `false` | |
+| `app.admin.email` | `admin@crm.com` | Synced to the `admin` user on every startup; conflicts with existing users are resolved automatically |
+| `otp.expiry-minutes` | `5` | Caffeine TTL for OTP codes |
+| `otp.length` | `6` | Digits in the generated OTP |
+| `device-trust.days` | `14` | How long a trusted-device cookie is valid |
+| `device-trust.cookie-name` | `DEVICE_TRUST` | HttpOnly cookie name |
+| `spring.mail.host` | `smtp.gmail.com` | SMTP server |
+| `spring.mail.port` | `587` | STARTTLS port |
+| `spring.mail.username` | — | Gmail address (also used as `From`) |
+| `spring.mail.password` | — | Gmail App Password (16-char, spaces OK) |
 
 ### `application-dev.properties`
 
@@ -2290,10 +2746,12 @@ Seeded on first boot by `DataInitializer`:
 |---|---|
 | Username | `admin` |
 | Password | `admin123` |
-| Email | `admin@crm.com` |
+| Email | Configurable via `app.admin.email` (default `admin@crm.com`). On every startup the admin user's email is synced to this value; any other user that already owns that email is moved to `username@crm.internal`. |
 | Roles | `ROLE_USER`, `ROLE_ADMIN` |
 
 **Change this password before exposing to any network.**
+
+> **2FA note:** Login sends a 6-digit OTP to the admin email via SMTP. Configure `spring.mail.*` and `app.admin.email` before first login. Check "Remember this device" to skip OTP for 14 days on the same browser.
 
 ---
 
@@ -2319,7 +2777,8 @@ Seeded on first boot by `DataInitializer`:
 | Products / Price List | `/products` | 12 |
 | Admin → Managing Users | `/users` (admin only) | 13 |
 | Data Import/Export | CSV import/export on grid views | 14 |
-| Subscribe/Notify → Alerts | notification bell + `/notifications` | 15 |
+| Subscribe/Notify → Alerts | `Alert` (NEW/READ/ACCEPTED/EXPIRED) + `Subscription` (5 named filters, event types) + `Topic` (11 standard) + `AuditLog` + `SubscriptionHandlerService` + bell badge + `SubscriptionsView` | 15 |
 | Documents / Attachments | file upload on any entity | 16 |
 | Calendar / Meetings | `/calendar` (month grid + .ics export) | 17 |
 | E-Mail Services | Spring Mail + EMAIL activity type | 18 |
+| Security → 2FA | Email OTP login + trusted device cookie + HTML email | 19 ✅ |

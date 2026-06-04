@@ -20,6 +20,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -102,6 +103,21 @@ public class ActivityController {
     @PatchMapping("/{id}/reopen")
     public ResponseEntity<ActivityResponse> reopen(@PathVariable Long id) {
         return ResponseEntity.ok(activityService.reopen(id));
+    }
+
+    @GetMapping("/calendar")
+    public ResponseEntity<List<ActivityResponse>> calendar(
+            @RequestParam LocalDate from,
+            @RequestParam LocalDate to) {
+        return ResponseEntity.ok(activityService.findForCalendar(from, to));
+    }
+
+    @GetMapping("/ical")
+    public ResponseEntity<String> ical() {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"crm-calendar.ics\"")
+                .contentType(MediaType.parseMediaType("text/calendar; charset=UTF-8"))
+                .body(activityService.buildIcal());
     }
 
     @GetMapping("/export")

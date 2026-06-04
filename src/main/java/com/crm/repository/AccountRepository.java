@@ -4,11 +4,14 @@ import com.crm.domain.entity.Account;
 import com.crm.domain.enums.AccountType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,4 +23,19 @@ public interface AccountRepository extends JpaRepository<Account, Long>, JpaSpec
     Page<Account> findByNameContainingIgnoreCase(String name, Pageable pageable);
     long countByNameContainingIgnoreCase(String name);
     boolean existsByEmail(String email);
+
+    // A-01: Dormant accounts with no recent activities, leads, or opportunities
+    @Query("""
+        SELECT a FROM Account a
+        WHERE NOT EXISTS (
+            SELECT 1 FROM Activity act WHERE act.account = a AND act.createdAt >= :cutoff
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM Lead l WHERE l.account = a AND l.updatedAt >= :cutoff
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM Opportunity o WHERE o.account = a AND o.updatedAt >= :cutoff
+        )
+        """)
+    List<Account> findDormant(@Param("cutoff") LocalDateTime cutoff);
 }

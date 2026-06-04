@@ -34,6 +34,7 @@ public class OpportunityService {
     private final LeadRepository leadRepository;
     private final QuoteRepository quoteRepository;
     private final NotificationService notificationService;
+    private final CrmEventPublisher eventPublisher;
 
     public OpportunityService(OpportunityRepository opportunityRepository,
                               UserRepository userRepository,
@@ -41,7 +42,8 @@ public class OpportunityService {
                               ContactRepository contactRepository,
                               LeadRepository leadRepository,
                               QuoteRepository quoteRepository,
-                              NotificationService notificationService) {
+                              NotificationService notificationService,
+                              CrmEventPublisher eventPublisher) {
         this.opportunityRepository = opportunityRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
@@ -49,12 +51,15 @@ public class OpportunityService {
         this.leadRepository = leadRepository;
         this.quoteRepository = quoteRepository;
         this.notificationService = notificationService;
+        this.eventPublisher = eventPublisher;
     }
 
     public OpportunityResponse create(OpportunityRequest request, String createdByUsername) {
         Opportunity opp = mapToEntity(new Opportunity(), request);
         userRepository.findByUsername(createdByUsername).ifPresent(opp::setCreatedBy);
-        return OpportunityResponse.from(opportunityRepository.save(opp));
+        Opportunity saved = opportunityRepository.save(opp);
+        eventPublisher.publishCreated("OPPORTUNITY", saved.getId());
+        return OpportunityResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -122,11 +127,14 @@ public class OpportunityService {
             notificationService.notify(saved.getAssignedTo().getId(),
                     "Opportunity WON: " + saved.getName(), "OPPORTUNITY", saved.getId());
         }
+        eventPublisher.publishUpdated("OPPORTUNITY", id,
+                java.util.Map.of("stage", saved.getStage().name()));
         return OpportunityResponse.from(saved);
     }
 
     public void delete(Long id) {
         opportunityRepository.delete(getOrThrow(id));
+        eventPublisher.publishDeleted("OPPORTUNITY", id);
     }
 
     private Opportunity getOrThrow(Long id) {

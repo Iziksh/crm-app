@@ -21,6 +21,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,19 +36,25 @@ public class ActivityService {
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
     private final NotificationService notificationService;
+    private final CrmEventPublisher eventPublisher;
+    private final EmailService emailService;
 
     public ActivityService(ActivityRepository activityRepository,
                            ActivityNoteRepository noteRepository,
                            UserRepository userRepository,
                            AccountRepository accountRepository,
                            ContactRepository contactRepository,
-                           NotificationService notificationService) {
+                           NotificationService notificationService,
+                           CrmEventPublisher eventPublisher,
+                           EmailService emailService) {
         this.activityRepository = activityRepository;
         this.noteRepository = noteRepository;
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
         this.notificationService = notificationService;
+        this.eventPublisher = eventPublisher;
+        this.emailService = emailService;
     }
 
     public ActivityResponse create(ActivityRequest request, String createdByUsername) {
@@ -57,6 +64,18 @@ public class ActivityService {
         if (saved.getAssignedTo() != null) {
             notificationService.notify(saved.getAssignedTo().getId(),
                     "New activity assigned: " + saved.getTitle(), "ACTIVITY", saved.getId());
+            if (saved.getAssignedTo().getEmail() != null) {
+                emailService.sendActivityAssigned(saved.getAssignedTo().getEmail(), saved.getTitle());
+            }
+        }
+        // Phase 18: if EMAIL type, send actual email to the linked contact
+        if (saved.getType() == ActivityType.EMAIL
+                && saved.getContact() != null
+                && saved.getContact().getEmail() != null) {
+            emailService.sendEmailActivity(
+                    saved.getContact().getEmail(),
+                    saved.getTitle(),
+                    saved.getDescription() != null ? saved.getDescription() : "");
         }
         return ActivityResponse.from(saved);
     }
@@ -115,11 +134,14 @@ public class ActivityService {
 
     public ActivityResponse update(Long id, ActivityRequest request) {
         Activity activity = getOrThrow(id);
-        return ActivityResponse.from(activityRepository.save(mapToEntity(activity, request)));
+        ActivityResponse response = ActivityResponse.from(activityRepository.save(mapToEntity(activity, request)));
+        eventPublisher.publishUpdated("ACTIVITY", id);
+        return response;
     }
 
     public void delete(Long id) {
         activityRepository.delete(getOrThrow(id));
+        eventPublisher.publishDeleted("ACTIVITY", id);
     }
 
     public ActivityResponse resolve(Long id) {
@@ -166,6 +188,46 @@ public class ActivityService {
         activity.setStatus(ActivityStatus.IN_PROGRESS);
         activity.setResolvedAt(null);
         return ActivityResponse.from(activityRepository.save(activity));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ActivityResponse> findForCalendar(LocalDate from, LocalDate to) {
+        return activityRepository.findByDueDateBetweenAndTypeInOrderByDueDate(
+                from, to,
+                List.of(ActivityType.MEETING, ActivityType.TASK, ActivityType.SALES_VISIT,
+                        ActivityType.CALL, ActivityType.EMAIL))
+                .stream().map(ActivityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public String buildIcal() {
+        LocalDate from = LocalDate.now();
+        LocalDate to = from.plusDays(90);
+        List<Activity> activities = activityRepository.findByDueDateBetweenAndTypeInOrderByDueDate(
+                from, to,
+                List.of(ActivityType.MEETING, ActivityType.TASK, ActivityType.SALES_VISIT));
+        StringBuilder sb = new StringBuilder();
+        sb.append("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CRM//EN\r\nCALSCALE:GREGORIAN\r\n");
+        for (Activity a : activities) {
+            sb.append("BEGIN:VEVENT\r\n");
+            sb.append("UID:crm-").append(a.getId()).append("@crm\r\n");
+            if (a.getDueDate() != null) {
+                String d = a.getDueDate().toString().replace("-", "");
+                sb.append("DTSTART;VALUE=DATE:").append(d).append("\r\n");
+                sb.append("DTEND;VALUE=DATE:").append(d).append("\r\n");
+            }
+            sb.append("SUMMARY:").append(ical(a.getTitle())).append("\r\n");
+            if (a.getDescription() != null) sb.append("DESCRIPTION:").append(ical(a.getDescription())).append("\r\n");
+            sb.append("STATUS:").append(a.getStatus() == ActivityStatus.RESOLVED ? "COMPLETED" : "CONFIRMED").append("\r\n");
+            sb.append("END:VEVENT\r\n");
+        }
+        sb.append("END:VCALENDAR");
+        return sb.toString();
+    }
+
+    private String ical(String text) {
+        if (text == null) return "";
+        return text.replace("\r\n", " ").replace("\n", " ").replace(",", "\\,").replace(";", "\\;");
     }
 
     private Activity getOrThrow(Long id) {

@@ -1,65 +1,62 @@
 package com.crm.service;
 
-import com.crm.domain.entity.AppNotification;
-import com.crm.dto.response.NotificationResponse;
-import com.crm.repository.AppNotificationRepository;
+import com.crm.domain.enums.AlertImportance;
+import com.crm.domain.enums.AlertState;
+import com.crm.domain.enums.SubscriptionEventType;
+import com.crm.dto.response.AlertResponse;
 import com.crm.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Thin facade kept for backwards compatibility with existing service callers.
+ * Delegates to AlertService (OpenCRX Alert model) and CrmEventPublisher.
+ */
 @Service
 @Transactional
 public class NotificationService {
 
-    private final AppNotificationRepository notificationRepository;
+    private final AlertService alertService;
+    private final CrmEventPublisher eventPublisher;
     private final UserRepository userRepository;
 
-    public NotificationService(AppNotificationRepository notificationRepository,
-                               UserRepository userRepository) {
-        this.notificationRepository = notificationRepository;
+    public NotificationService(AlertService alertService,
+                                CrmEventPublisher eventPublisher,
+                                UserRepository userRepository) {
+        this.alertService = alertService;
+        this.eventPublisher = eventPublisher;
         this.userRepository = userRepository;
     }
 
     public void notify(Long userId, String message, String entityType, Long entityId) {
         userRepository.findById(userId).ifPresent(user -> {
-            AppNotification n = new AppNotification();
-            n.setUser(user);
-            n.setMessage(message);
-            n.setEntityType(entityType);
-            n.setEntityId(entityId);
-            notificationRepository.save(n);
+            // Create a direct alert (no dedup — resendDelaySeconds = 0)
+            alertService.sendAlert(user.getUsername(), message, null,
+                    AlertImportance.NORMAL, 0, entityType, entityId);
+            // Publish event so subscriptions can also fire
+            if (entityType != null && entityId != null) {
+                eventPublisher.publish(entityType, entityId, SubscriptionEventType.OBJECT_CREATION, java.util.Map.of());
+            }
         });
     }
 
     @Transactional(readOnly = true)
-    public List<NotificationResponse> getUnread(String username) {
-        return userRepository.findByUsername(username).map(user ->
-                notificationRepository.findByUser_IdAndReadFalseOrderByCreatedAtDesc(user.getId())
-                        .stream().map(NotificationResponse::from).toList()
-        ).orElse(List.of());
+    public List<AlertResponse> getUnread(String username) {
+        return alertService.getForUser(username, List.of(AlertState.NEW));
     }
 
     @Transactional(readOnly = true)
     public long countUnread(String username) {
-        return userRepository.findByUsername(username)
-                .map(u -> notificationRepository.countByUser_IdAndReadFalse(u.getId()))
-                .orElse(0L);
+        return alertService.countUnread(username);
     }
 
-    public void markRead(Long notificationId) {
-        notificationRepository.findById(notificationId).ifPresent(n -> {
-            n.setRead(true);
-            notificationRepository.save(n);
-        });
+    public void markRead(Long alertId) {
+        alertService.markAsRead(alertId);
     }
 
     public void markAllRead(String username) {
-        userRepository.findByUsername(username).ifPresent(user -> {
-            List<AppNotification> unread = notificationRepository.findByUser_IdAndReadFalse(user.getId());
-            unread.forEach(n -> n.setRead(true));
-            notificationRepository.saveAll(unread);
-        });
+        alertService.markAllRead(username);
     }
 }

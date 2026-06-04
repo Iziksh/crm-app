@@ -1,12 +1,35 @@
 package com.crm.ui;
 
-import com.vaadin.flow.component.Html;
+import com.crm.service.DeviceTrustService;
+import com.crm.service.EmailService;
+import com.crm.service.OtpService;
+import com.crm.service.UserService;
+import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.html.Div;
+import com.vaadin.flow.component.html.H2;
+import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.PasswordField;
+import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.VaadinRequest;
+import com.vaadin.flow.server.VaadinService;
+import com.vaadin.flow.server.VaadinServletRequest;
+import com.vaadin.flow.server.VaadinSession;
+import com.vaadin.flow.theme.lumo.LumoUtility;
+import jakarta.servlet.http.Cookie;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import com.vaadin.flow.server.auth.AnonymousAllowed;
 
 @Route("login")
@@ -14,50 +37,143 @@ import com.vaadin.flow.server.auth.AnonymousAllowed;
 @AnonymousAllowed
 public class LoginView extends VerticalLayout implements BeforeEnterObserver {
 
-    private final Div errorMsg = new Div("Incorrect username or password.");
+    private final AuthenticationManager authenticationManager;
+    private final UserService userService;
+    private final OtpService otpService;
+    private final EmailService emailService;
+    private final DeviceTrustService deviceTrustService;
 
-    public LoginView() {
+    private final Span errorMsg = new Span();
+
+    public LoginView(AuthenticationManager authenticationManager,
+                     UserService userService,
+                     OtpService otpService,
+                     EmailService emailService,
+                     DeviceTrustService deviceTrustService) {
+        this.authenticationManager = authenticationManager;
+        this.userService = userService;
+        this.otpService = otpService;
+        this.emailService = emailService;
+        this.deviceTrustService = deviceTrustService;
+
         setSizeFull();
         setAlignItems(Alignment.CENTER);
         setJustifyContentMode(JustifyContentMode.CENTER);
 
-        errorMsg.getStyle()
-                .set("color", "#d32f2f")
-                .set("font-size", "14px")
-                .set("margin-bottom", "4px");
+        Div card = new Div();
+        card.getStyle()
+                .set("background", "#fff")
+                .set("padding", "32px")
+                .set("border-radius", "8px")
+                .set("box-shadow", "0 2px 8px rgba(0,0,0,.15)")
+                .set("min-width", "320px")
+                .set("display", "flex")
+                .set("flex-direction", "column")
+                .set("gap", "12px");
+
+        H2 title = new H2("CRM");
+        title.addClassNames(LumoUtility.Margin.NONE, LumoUtility.TextAlignment.CENTER);
+        title.getStyle().set("color", "#1565c0");
+
+        errorMsg.getStyle().set("color", "#d32f2f").set("font-size", "14px");
         errorMsg.setVisible(false);
 
-        Html form = new Html("""
-                <form method="post" action="login"
-                      style="background:#fff;padding:32px;border-radius:8px;
-                             box-shadow:0 2px 8px rgba(0,0,0,.15);min-width:320px;
-                             display:flex;flex-direction:column;gap:14px;">
-                  <h2 style="margin:0 0 4px;text-align:center;color:#1565c0;">CRM</h2>
-                  <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:500;">
-                    Username
-                    <input type="text" name="username" autocomplete="username"
-                           style="padding:8px 12px;border:1px solid #bbb;border-radius:4px;font-size:14px;outline:none;"/>
-                  </label>
-                  <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:500;">
-                    Password
-                    <input type="password" name="password" autocomplete="current-password"
-                           style="padding:8px 12px;border:1px solid #bbb;border-radius:4px;font-size:14px;outline:none;"/>
-                  </label>
-                  <button type="submit"
-                          style="padding:10px;background:#1565c0;color:#fff;border:none;
-                                 border-radius:4px;cursor:pointer;font-size:14px;margin-top:4px;">
-                    Log in
-                  </button>
-                </form>
-                """);
+        TextField usernameField = new TextField("Username");
+        usernameField.setWidthFull();
+        usernameField.setAutofocus(true);
 
-        add(errorMsg, form);
+        PasswordField passwordField = new PasswordField("Password");
+        passwordField.setWidthFull();
+
+        Button loginBtn = new Button("Log in", e -> handleLogin(usernameField.getValue(), passwordField.getValue()));
+        loginBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        loginBtn.setWidthFull();
+
+        passwordField.addKeyDownListener(com.vaadin.flow.component.Key.ENTER,
+                ev -> handleLogin(usernameField.getValue(), passwordField.getValue()));
+
+        card.add(title, errorMsg, usernameField, passwordField, loginBtn);
+        add(card);
+    }
+
+    private void handleLogin(String username, String password) {
+        errorMsg.setVisible(false);
+        if (username.isBlank() || password.isBlank()) {
+            showError("Username and password are required.");
+            return;
+        }
+
+        Authentication auth;
+        try {
+            auth = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(username.trim(), password));
+        } catch (BadCredentialsException e) {
+            showError("Incorrect username or password.");
+            return;
+        } catch (Exception e) {
+            showError("Login failed. Please try again.");
+            return;
+        }
+
+        UserDetails userDetails = (UserDetails) auth.getPrincipal();
+        String email = userService.findEmailByUsername(userDetails.getUsername()).orElse(null);
+
+        if (email == null) {
+            showError("Your account has no email address configured. Contact an administrator.");
+            return;
+        }
+
+        // Check for a trusted device cookie
+        String cookieValue = readCookie(deviceTrustService.getCookieName());
+        if (cookieValue != null && deviceTrustService.isTokenValid(cookieValue, email)) {
+            completeAuthentication(auth);
+            return;
+        }
+
+        // No trusted device — send OTP and proceed to verification
+        String otp = otpService.generateAndStore(email);
+        emailService.sendOtp(email, otp);
+
+        VaadinSession.getCurrent().setAttribute("2fa_username", userDetails.getUsername());
+        VaadinSession.getCurrent().setAttribute("2fa_email", email);
+
+        getUI().ifPresent(ui -> ui.navigate("verify-otp"));
+    }
+
+    private void completeAuthentication(Authentication auth) {
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(auth);
+        SecurityContextHolder.setContext(context);
+        VaadinSession.getCurrent().getSession().setAttribute(
+                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+        getUI().ifPresent(ui -> ui.getPage().setLocation("/"));
+    }
+
+    private String readCookie(String name) {
+        VaadinRequest request = VaadinService.getCurrentRequest();
+        if (request instanceof VaadinServletRequest vsr) {
+            Cookie[] cookies = vsr.getHttpServletRequest().getCookies();
+            if (cookies != null) {
+                for (Cookie c : cookies) {
+                    if (name.equals(c.getName())) return c.getValue();
+                }
+            }
+        }
+        return null;
+    }
+
+    private void showError(String message) {
+        errorMsg.setText(message);
+        errorMsg.setVisible(true);
     }
 
     @Override
     public void beforeEnter(BeforeEnterEvent event) {
-        if (event.getLocation().getQueryParameters().getParameters().containsKey("error")) {
-            errorMsg.setVisible(true);
+        // Clear any stale 2FA session data if navigating back to login
+        VaadinSession session = VaadinSession.getCurrent();
+        if (session != null) {
+            session.setAttribute("2fa_username", null);
+            session.setAttribute("2fa_email", null);
         }
     }
 }

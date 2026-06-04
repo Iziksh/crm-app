@@ -18,9 +18,11 @@ import java.util.List;
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final CrmEventPublisher eventPublisher;
 
-    public AccountService(AccountRepository accountRepository) {
+    public AccountService(AccountRepository accountRepository, CrmEventPublisher eventPublisher) {
         this.accountRepository = accountRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     public AccountResponse create(AccountRequest request) {
@@ -28,7 +30,9 @@ public class AccountService {
             throw new DuplicateEmailException(request.email());
         }
         Account account = mapToEntity(new Account(), request);
-        return AccountResponse.from(accountRepository.save(account));
+        AccountResponse response = AccountResponse.from(accountRepository.save(account));
+        eventPublisher.publishCreated("ACCOUNT", response.id());
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -79,11 +83,14 @@ public class AccountService {
                 && accountRepository.existsByEmail(request.email())) {
             throw new DuplicateEmailException(request.email());
         }
-        return AccountResponse.from(accountRepository.save(mapToEntity(account, request)));
+        AccountResponse response = AccountResponse.from(accountRepository.save(mapToEntity(account, request)));
+        eventPublisher.publishUpdated("ACCOUNT", id);
+        return response;
     }
 
     public void delete(Long id) {
         accountRepository.delete(getOrThrow(id));
+        eventPublisher.publishDeleted("ACCOUNT", id);
     }
 
     private Account getOrThrow(Long id) {

@@ -21,10 +21,13 @@ public class ContactService {
 
     private final ContactRepository contactRepository;
     private final AccountRepository accountRepository;
+    private final CrmEventPublisher eventPublisher;
 
-    public ContactService(ContactRepository contactRepository, AccountRepository accountRepository) {
+    public ContactService(ContactRepository contactRepository, AccountRepository accountRepository,
+                          CrmEventPublisher eventPublisher) {
         this.contactRepository = contactRepository;
         this.accountRepository = accountRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     public ContactResponse create(ContactRequest request) {
@@ -32,7 +35,9 @@ public class ContactService {
             throw new DuplicateEmailException(request.email());
         }
         Contact contact = mapToEntity(new Contact(), request);
-        return ContactResponse.from(contactRepository.save(contact));
+        ContactResponse response = ContactResponse.from(contactRepository.save(contact));
+        eventPublisher.publishCreated("CONTACT", response.id());
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -84,11 +89,14 @@ public class ContactService {
         if (!request.email().equals(contact.getEmail()) && contactRepository.existsByEmail(request.email())) {
             throw new DuplicateEmailException(request.email());
         }
-        return ContactResponse.from(contactRepository.save(mapToEntity(contact, request)));
+        ContactResponse response = ContactResponse.from(contactRepository.save(mapToEntity(contact, request)));
+        eventPublisher.publishUpdated("CONTACT", id);
+        return response;
     }
 
     public void delete(Long id) {
         contactRepository.delete(getOrThrow(id));
+        eventPublisher.publishDeleted("CONTACT", id);
     }
 
     private Contact getOrThrow(Long id) {
