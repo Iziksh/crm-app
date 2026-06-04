@@ -33,7 +33,7 @@ public class IsraeliHolidayService {
 
         while (cursor.isBefore(end)) {
             JewishCalendar jCal = new JewishCalendar();
-            jCal.setGregorianDate(cursor.getYear(), cursor.getMonthValue(), cursor.getDayOfMonth());
+            jCal.setGregorianDate(cursor.getYear(), cursor.getMonthValue() - 1, cursor.getDayOfMonth());
             jCal.setInIsrael(true);
 
             String name = resolveHolidayName(jCal);
