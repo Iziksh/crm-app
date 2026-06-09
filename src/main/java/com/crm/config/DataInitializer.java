@@ -27,19 +27,22 @@ public class DataInitializer implements ApplicationRunner {
     private final NotificationConfigRepository configRepository;
     private final PasswordEncoder passwordEncoder;
     private final String adminEmail;
+    private final String admin2Email;
 
     public DataInitializer(UserRepository userRepository,
                            WorkspaceRepository workspaceRepository,
                            TopicRepository topicRepository,
                            NotificationConfigRepository configRepository,
                            PasswordEncoder passwordEncoder,
-                           @Value("${app.admin.email:admin@crm.com}") String adminEmail) {
+                           @Value("${app.admin.email:admin@crm.com}") String adminEmail,
+                           @Value("${app.admin2.email:vladik@crm.internal}") String admin2Email) {
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
         this.topicRepository = topicRepository;
         this.configRepository = configRepository;
         this.passwordEncoder = passwordEncoder;
         this.adminEmail = adminEmail;
+        this.admin2Email = admin2Email;
     }
 
     @Override
@@ -66,6 +69,15 @@ public class DataInitializer implements ApplicationRunner {
                 admin.setEmail(adminEmail);
                 admin = userRepository.save(admin);
             }
+        }
+
+        if (!userRepository.existsByUsername("VladiK")) {
+            User vladik = new User();
+            vladik.setUsername("VladiK");
+            vladik.setEmail(admin2Email);
+            vladik.setPassword(passwordEncoder.encode("admin123"));
+            vladik.setRoles(Set.of("ROLE_USER", "ROLE_ADMIN"));
+            userRepository.save(vladik);
         }
 
         if (workspaceRepository.count() == 0) {

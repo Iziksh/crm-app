@@ -1,0 +1,232 @@
+/* ── Attendance Calendar ─────────────────────────────────────────────────── */
+
+.attendance-calendar-page {
+    max-width: 540px;
+    margin: 0 auto;
+    background: #fff;
+}
+
+/* ── Profile section ─────────────────────────────────────────────────────── */
+
+.profile-section {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 14px 18px;
+    border-bottom: 1px solid #e0e0e0;
+    direction: rtl;
+}
+
+.profile-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #e8e8e8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.profile-info {
+    display: flex;
+    flex-direction: column;
+    text-align: right;
+    flex: 1;
+}
+
+.profile-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #222;
+    line-height: 1.4;
+}
+
+.profile-id {
+    font-size: 13px;
+    color: #888;
+    margin-top: 1px;
+}
+
+/* ── Month navigation ────────────────────────────────────────────────────── */
+
+.month-nav-bar {
+    padding: 4px 6px !important;
+    border-bottom: 1px solid #ebebeb;
+    direction: rtl;
+    gap: 0 !important;
+}
+
+.month-label {
+    flex: 1;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 400;
+    color: #444;
+}
+
+.nav-arrow-btn {
+    color: #555 !important;
+}
+
+.menu-btn {
+    color: #bbb !important;
+}
+
+.admin-user-picker {
+    margin: 6px 16px 2px !important;
+    width: calc(100% - 32px) !important;
+}
+
+/* ── Calendar grid ───────────────────────────────────────────────────────── */
+
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    direction: rtl;
+    width: 100%;
+}
+
+/* Day-name header row */
+.cal-header-cell {
+    text-align: center;
+    font-size: 14px;
+    color: #999;
+    font-weight: 400;
+    padding: 10px 0 8px;
+    border-bottom: 1px solid #ccc;
+}
+
+.cal-header-shabbat {
+    color: #ccc;
+}
+
+/* Empty leading cells (before 1st of month) */
+.cal-empty-cell {
+    min-height: 64px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+/* Normal day cell */
+.cal-day-cell {
+    min-height: 100px;
+    padding: 5px 4px 7px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    border-bottom: 1px solid #e8e8e8;
+    cursor: pointer;
+    transition: background 0.1s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.cal-day-cell:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.cal-shabbat {
+    background: #f5f5f5;
+}
+
+.cal-holiday {
+    background: #f0f9ff;
+}
+
+/* Today overrides all other backgrounds */
+.cal-today {
+    background: #dff2fb !important;
+}
+
+/* ── Cell content ────────────────────────────────────────────────────────── */
+
+/* Entry-time slot (always rendered to keep consistent cell height) */
+.entry-time {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.5;
+    min-height: 17px;
+    white-space: nowrap;
+}
+
+/* Exit time — second line, slightly lighter */
+.exit-time {
+    font-size: 11px;
+    color: #aaa;
+    line-height: 1.5;
+    min-height: 17px;
+    white-space: nowrap;
+}
+
+/* Absence mark (red ✕) occupies same top slot */
+.absence-mark {
+    font-size: 15px;
+    font-weight: 700;
+    color: #e53935;
+    line-height: 1.5;
+    min-height: 17px;
+}
+
+/* Date number */
+.day-number {
+    font-size: 20px;
+    font-weight: 400;
+    color: #333;
+    line-height: 1.3;
+}
+
+/* Absent date number is red */
+.absent-num {
+    color: #e53935 !important;
+}
+
+/* Daily total time (e.g. "7:30") */
+.day-total {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1565c0;
+    line-height: 1.3;
+    margin-top: 1px;
+}
+
+.day-total-deficit {
+    color: #e65100;
+}
+
+/* Delta time (e.g. "+1:30" / "-0:45") */
+.day-delta {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.day-delta-pos {
+    color: #2e7d32;
+}
+
+.day-delta-neg {
+    color: #e53935;
+}
+
+/* Holiday name below date */
+.holiday-name {
+    font-size: 10px;
+    color: var(--lumo-primary-color, #1e88e5);
+    margin-top: 3px;
+    text-align: center;
+    line-height: 1.2;
+}
+
+/* ── Monthly totals footer ───────────────────────────────────────────────── */
+
+.total-line {
+    display: block;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--lumo-primary-color, #1e88e5);
+    text-align: right;
+    border-top: 1px solid #e8e8e8;
+}

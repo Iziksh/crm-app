@@ -1,5 +1,6 @@
 package com.crm.exception;
 
+import com.crm.timetracking.exception.AttendanceValidationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +48,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex, HttpServletRequest req) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ErrorResponse(403, "Forbidden", ex.getMessage(), req.getRequestURI()));
+    }
+
+    @ExceptionHandler(AttendanceValidationException.class)
+    public ResponseEntity<ErrorResponse> handleAttendanceValidation(
+            AttendanceValidationException ex, HttpServletRequest req) {
+        // 422 Unprocessable Entity: request is syntactically valid but fails semantic rules
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse(422, "Unprocessable Entity", ex.getMessage(), req.getRequestURI()));
     }
 
     @ExceptionHandler(BadRequestException.class)

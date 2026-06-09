@@ -18,6 +18,12 @@ target/
 
 # Vaadin generated (rebuilt on startup)
 src/main/frontend/generated/
+src/main/bundles/
+node_modules/
+package.json
+package-lock.json
+tsconfig.json
+types.d.ts
 
 # Logs
 *.log

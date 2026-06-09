@@ -5,6 +5,7 @@ import com.crm.dto.response.UserSummaryResponse;
 import com.crm.service.AlertService;
 import com.crm.service.NotificationService;
 import com.crm.service.UserService;
+import com.crm.ui.attendance.AttendanceCalendarView;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.applayout.AppLayout;
 import com.vaadin.flow.component.applayout.DrawerToggle;
@@ -267,6 +268,10 @@ public class MainLayout extends AppLayout {
         SideNavItem hr = new SideNavItem("HR");
         hr.setPrefixComponent(VaadinIcon.CLOCK.create());
         hr.addItem(new SideNavItem("Time Clock", TimeClockView.class, VaadinIcon.CLOCK.create()));
+        hr.addItem(new SideNavItem("Attendance Calendar", AttendanceCalendarView.class, VaadinIcon.CALENDAR.create()));
+        if (securityService.hasRole("ADMIN")) {
+            hr.addItem(new SideNavItem("Corrections", AttendanceCorrectionView.class, VaadinIcon.CHECK_CIRCLE.create()));
+        }
         nav.addItem(hr);
 
         addToDrawer(nav);
