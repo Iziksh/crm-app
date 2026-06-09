@@ -31,7 +31,7 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 - Statele
 - REST API secured with JWT
 - H2 in dev, PostgreSQL in prod
-
+    
 ---
 
 ## 2. OpenCRX → Spring Boot Feature Map
@@ -3511,3 +3511,1211 @@ Seeded on first boot by `DataInitializer`:
 | Time Clock → Clock In/Out | `attendance` table + punchIn/punchOut + dedup index | 21–23 |
 | Time Clock → Israeli Holidays | KosherJava + `holidays` table + annual cron recalc | 24 |
 | Time Clock → Accountant Report | Apache POI `.xlsx` + monthly cron + email attachment | 25 |
+| **Time Clock** | Manual Attendance Reports — Hilan "עדכון נוכחות" | `AttendanceReport` + `AttendanceReportType` enum + `AttendanceReportService` + `DurationCalculator` + `AttendanceCalendarView` + `AttendanceReportEditor` (Phase F–G) |
+
+
+---
+
+### Phase F — Manual Attendance Reporting: Data Layer Extensions
+
+#### Design Decision: New Table vs. Extending `attendance`
+
+The existing `attendance` table (Phases 21–22) models **clock sessions**: a single open row per user, entered implicitly by the punch-in/punch-out clock. Its invariants — the partial unique index `uq_attendance_active_session`, the `CHECK (end_time > start_time)`, and the `source` field — are tightly coupled to the clock workflow.
+
+The new manual-reporting module models **declared attendance records**: one or more explicit entries per `(user_id, date)`, entered by an HR user or the employee themselves, possibly carrying no clock times at all (e.g., a vacation day). The semantics differ enough that merging them into `attendance` would either break existing Phase 23 constraints or require a discriminator column that pollutes every existing query.
+
+**Decision: introduce a new `attendance_report` table linked to `users.id`.** The two tables coexist independently. `MonthlyReportJob` (Phase 25) is extended to read both (see Integration note at the end of Phase G).
+
+---
+
+#### BE Step F.1 — `attendance_report` Table DDL
+
+Flyway script: `V2.2.0__create_attendance_report_table.sql`
+
+```sql
+CREATE TABLE attendance_report (
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id            BIGINT      NOT NULL,
+    report_date        DATE        NOT NULL,
+    entry_time         TIME,                           -- NULL allowed for absence-style types
+    exit_time          TIME,                           -- NULL allowed for absence-style types
+    duration_minutes   INT         CHECK (duration_minutes IS NULL OR duration_minutes >= 0),
+    note               TEXT,
+    report_type        VARCHAR(32) NOT NULL DEFAULT 'PRESENCE',
+    equate_to_standard BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_attendance_report_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+
+    -- PRESENCE reports must supply both clock times; absence-style types may omit them
+    CONSTRAINT chk_presence_requires_times
+        CHECK (
+            report_type != 'PRESENCE'
+            OR (entry_time IS NOT NULL AND exit_time IS NOT NULL)
+        )
+);
+
+-- Primary query pattern: all reports for a user within a given month
+CREATE INDEX idx_ar_user_date      ON attendance_report (user_id, report_date);
+-- Secondary: admin queries across all users by date range
+CREATE INDEX idx_ar_date           ON attendance_report (report_date);
+-- Covering index for the monthly calendar GROUP BY aggregation
+CREATE INDEX idx_ar_user_date_type ON attendance_report (user_id, report_date, report_type);
+```
+
+**Field rationale:**
+- `report_date DATE` — the calendar day being reported. Deliberately `DATE`, not `TIMESTAMP`, to avoid timezone ambiguity for a date-only concept.
+- `entry_time TIME` / `exit_time TIME` — wall-clock times without a timezone component. The service interprets them as `Asia/Jerusalem` local times. Pure `TIME` (no TZ) avoids DST rewrites: Israeli DST should not alter a historical "arrived at 08:00" record.
+- `duration_minutes INT` — stored in whole minutes (not seconds) for readability in SQL and in the Excel report. Maximum representable single shift: 1439 min (23 h 59 m).
+- `equate_to_standard BOOLEAN` — Hilan "השוואה לתקן": when `true`, the day counts as a full standard workday regardless of actual clock times.
+
+Reuse the existing auto-update trigger function defined in Phase 21:
+
+```sql
+CREATE TRIGGER attendance_report_set_updated_at
+    BEFORE UPDATE ON attendance_report
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+```
+
+Flyway script `V2.2.1__add_report_type_check_constraint.sql`:
+
+```sql
+ALTER TABLE attendance_report
+    ADD CONSTRAINT chk_report_type_valid
+    CHECK (report_type IN (
+        'PRESENCE', 'VACATION', 'SICK', 'RESERVE_DUTY', 'HOLIDAY', 'ABSENCE'
+    ));
+```
+
+---
+
+#### BE Step F.2 — `AttendanceReportType` Enum
+
+Create **`com/crm/timetracking/enums/AttendanceReportType.java`**:
+
+```java
+public enum AttendanceReportType {
+
+    //                    hebrewLabel   countsAsWorked  creditsStandardHours
+    PRESENCE     ("נוכחות",   true,  false),
+    VACATION     ("חופשה",    false, true),
+    SICK         ("מחלה",     false, true),
+    RESERVE_DUTY ("מילואים",  false, true),
+    HOLIDAY      ("חג",       false, true),
+    ABSENCE      ("היעדרות",  false, false);
+
+    private final String  hebrewLabel;
+    /**
+     * True only for PRESENCE: actual clock-time worked counts toward "hours worked" totals.
+     * All other types use creditsStandardHours instead.
+     */
+    private final boolean countsAsWorked;
+    /**
+     * True for VACATION/SICK/RESERVE_DUTY/HOLIDAY: the day receives a credit equal to
+     * the standard workday hours (ה.לתקן), regardless of actual clock time.
+     */
+    private final boolean creditsStandardHours;
+
+    AttendanceReportType(String hebrewLabel,
+                         boolean countsAsWorked,
+                         boolean creditsStandardHours) {
+        this.hebrewLabel          = hebrewLabel;
+        this.countsAsWorked       = countsAsWorked;
+        this.creditsStandardHours = creditsStandardHours;
+    }
+
+    public String  getHebrewLabel()          { return hebrewLabel; }
+    public boolean isCountsAsWorked()        { return countsAsWorked; }
+    public boolean isCreditsStandardHours()  { return creditsStandardHours; }
+}
+```
+
+No separate `report_type` DB table is needed: the six values are a closed set defined by Israeli labour-law and Hilan conventions. The `CHECK` constraint in Step F.1 provides DB-level enforcement.
+
+Seed data summary (for documentation and reference):
+
+| Enum Constant | Hebrew Label | countsAsWorked | creditsStandardHours |
+|---|---|---|---|
+| `PRESENCE` | נוכחות | true | false |
+| `VACATION` | חופשה | false | true |
+| `SICK` | מחלה | false | true |
+| `RESERVE_DUTY` | מילואים | false | true |
+| `HOLIDAY` | חג | false | true |
+| `ABSENCE` | היעדרות | false | false |
+
+---
+
+#### BE Step F.3 — Duration Calculation: Midnight-Crossing Shifts
+
+Create **`com/crm/timetracking/util/DurationCalculator.java`**:
+
+```java
+public final class DurationCalculator {
+
+    private DurationCalculator() {}
+
+    /**
+     * Computes the duration in whole minutes between two LocalTime values.
+     *
+     * Handles midnight-crossing shifts by adding 1440 minutes when the raw
+     * Duration is negative.  This correctly models a single midnight crossing.
+     *
+     * Examples:
+     *   entry=08:00, exit=17:00  -->  540 min  (9 h, normal shift)
+     *   entry=22:00, exit=00:00  -->  120 min  (2 h, midnight-crossing)
+     *   entry=22:00, exit=00:30  -->  150 min  (2 h 30 m, midnight-crossing)
+     *
+     * Precondition: the caller must ensure duration is less than 1440 min;
+     * the service validator rejects duration >= 1440.
+     */
+    public static int computeMinutes(LocalTime entry, LocalTime exit) {
+        int minutes = (int) Duration.between(entry, exit).toMinutes();
+        if (minutes < 0) {
+            minutes += 24 * 60;   // 1440 added once for a single midnight crossing
+        }
+        return minutes;
+    }
+
+    /** Formats total minutes as "H:mm" for display in Vaadin and Excel. */
+    public static String formatMinutes(int totalMinutes) {
+        return String.format("%d:%02d", totalMinutes / 60, totalMinutes % 60);
+    }
+}
+```
+
+**Verification:**
+- `Duration.between(LocalTime.of(22,0), LocalTime.of(0,0)).toMinutes()` = `-1320` → `-1320 + 1440` = **120** ✓
+- `Duration.between(LocalTime.of(8,0), LocalTime.of(17,0)).toMinutes()` = **540** ✓
+
+---
+
+#### BE Step F.4 — `AttendanceReport` Entity
+
+Create **`com/crm/timetracking/entity/AttendanceReport.java`**:
+
+```java
+@Entity
+@Table(
+    name = "attendance_report",
+    indexes = {
+        @Index(name = "idx_ar_user_date",      columnList = "user_id, report_date"),
+        @Index(name = "idx_ar_user_date_type", columnList = "user_id, report_date, report_type")
+    }
+)
+public class AttendanceReport {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    // Plain Long -- mirrors Attendance.userId pattern (Phase 22) to keep
+    // the timetracking package decoupled from com.crm.domain.entity.User.
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    @Column(name = "report_date", nullable = false)
+    private LocalDate reportDate;
+
+    @Column(name = "entry_time")
+    private LocalTime entryTime;        // null for absence-style types
+
+    @Column(name = "exit_time")
+    private LocalTime exitTime;         // null for absence-style types
+
+    // Stored in minutes; null when no clock times are present; computed on every save.
+    @Column(name = "duration_minutes")
+    private Integer durationMinutes;
+
+    @Column(name = "note", columnDefinition = "TEXT")
+    private String note;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "report_type", nullable = false, length = 32)
+    private AttendanceReportType reportType = AttendanceReportType.PRESENCE;
+
+    @Column(name = "equate_to_standard", nullable = false)
+    private boolean equateToStandard = false;
+
+    @Column(name = "created_at", nullable = false, updatable = false,
+            columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    private OffsetDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false,
+            columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    private OffsetDateTime updatedAt;
+
+    @PrePersist void onCreate() { createdAt = updatedAt = OffsetDateTime.now(); }
+    @PreUpdate  void onUpdate() { updatedAt = OffsetDateTime.now(); }
+
+    public AttendanceReport() {}
+
+    // Getters and setters for all fields (no Lombok -- follow existing entity pattern)
+}
+```
+
+---
+
+#### BE Step F.5 — `AttendanceReportRepository`
+
+Create **`com/crm/timetracking/repository/AttendanceReportRepository.java`**:
+
+```java
+@Repository
+public interface AttendanceReportRepository extends JpaRepository<AttendanceReport, Long> {
+
+    /** All reports for one user on one day, ordered by entry time ascending. */
+    List<AttendanceReport> findByUserIdAndReportDateOrderByEntryTimeAscIdAsc(
+            Long userId, LocalDate reportDate);
+
+    /**
+     * All reports for a user within an inclusive date range.
+     * Used by getMonthlyCalendar and the Excel report extension.
+     */
+    @Query("""
+        SELECT r FROM AttendanceReport r
+        WHERE r.userId     = :userId
+          AND r.reportDate >= :from
+          AND r.reportDate <= :to
+        ORDER BY r.reportDate ASC, r.entryTime ASC NULLS LAST, r.id ASC
+    """)
+    List<AttendanceReport> findByUserIdAndDateRange(
+            @Param("userId") Long userId,
+            @Param("from")   LocalDate from,
+            @Param("to")     LocalDate to);
+
+    /**
+     * Per-day duration sums for calendar cell totals.
+     * Returns Object[]{LocalDate reportDate, Long sumDurationMinutes}.
+     */
+    @Query("""
+        SELECT r.reportDate, SUM(r.durationMinutes)
+        FROM AttendanceReport r
+        WHERE r.userId          = :userId
+          AND r.reportDate      >= :from
+          AND r.reportDate      <= :to
+          AND r.durationMinutes IS NOT NULL
+        GROUP BY r.reportDate
+        ORDER BY r.reportDate ASC
+    """)
+    List<Object[]> sumWorkedMinutesByDay(
+            @Param("userId") Long userId,
+            @Param("from")   LocalDate from,
+            @Param("to")     LocalDate to);
+
+    /** All reports for ALL users within a date range -- used by ExcelReportService. */
+    @Query("""
+        SELECT r FROM AttendanceReport r
+        WHERE r.reportDate >= :from
+          AND r.reportDate <= :to
+        ORDER BY r.userId ASC, r.reportDate ASC, r.entryTime ASC NULLS LAST
+    """)
+    List<AttendanceReport> findAllByDateRange(
+            @Param("from") LocalDate from,
+            @Param("to")   LocalDate to);
+}
+```
+
+---
+
+### Phase F — Manual Attendance Reporting: Service Layer
+
+#### BE Step F.6 — DTOs
+
+**`AttendanceReportRequest`** record (`com/crm/timetracking/dto/AttendanceReportRequest.java`):
+
+```java
+public record AttendanceReportRequest(
+    @NotNull LocalDate            reportDate,
+    LocalTime                     entryTime,       // null for absence-style types
+    LocalTime                     exitTime,        // null for absence-style types
+    String                        note,
+    @NotNull AttendanceReportType reportType,
+    boolean                       equateToStandard
+) {}
+```
+
+**`AttendanceReportResponse`** record:
+
+```java
+public record AttendanceReportResponse(
+    Long                 id,
+    Long                 userId,
+    LocalDate            reportDate,
+    LocalTime            entryTime,
+    LocalTime            exitTime,
+    Integer              durationMinutes,
+    String               durationFormatted,  // "H:mm" or null
+    String               note,
+    AttendanceReportType reportType,
+    String               reportTypeLabel,    // enum.getHebrewLabel()
+    boolean              equateToStandard,
+    OffsetDateTime       createdAt
+) {
+    public static AttendanceReportResponse from(AttendanceReport r) {
+        return new AttendanceReportResponse(
+            r.getId(), r.getUserId(), r.getReportDate(),
+            r.getEntryTime(), r.getExitTime(),
+            r.getDurationMinutes(),
+            r.getDurationMinutes() != null
+                ? DurationCalculator.formatMinutes(r.getDurationMinutes()) : null,
+            r.getNote(),
+            r.getReportType(), r.getReportType().getHebrewLabel(),
+            r.isEquateToStandard(), r.getCreatedAt()
+        );
+    }
+}
+```
+
+**`DayCalendarEntry`** record (one entry per calendar day inside `MonthlyCalendarResponse`):
+
+```java
+public record DayCalendarEntry(
+    LocalDate                      date,
+    List<AttendanceReportResponse> reports,
+    int                            totalWorkedMinutes,  // computed by service
+    int                            standardMinutes,     // expected hours for this day
+    boolean                        isWeekend,
+    boolean                        isHoliday,
+    String                         holidayName,         // null if not a holiday
+    int                            deltaMinutes         // totalWorkedMinutes - standardMinutes
+) {}
+```
+
+**`MonthlyCalendarResponse`** record:
+
+```java
+public record MonthlyCalendarResponse(
+    Long                   userId,
+    String                 username,
+    int                    year,
+    int                    month,
+    List<DayCalendarEntry> days,
+    int                    totalWorkedMinutes,
+    int                    totalStandardMinutes,
+    int                    totalDeltaMinutes
+) {}
+```
+
+---
+
+#### BE Step F.7 — `AttendanceReportService`
+
+Create **`com/crm/timetracking/service/AttendanceReportService.java`**:
+
+```java
+@Service
+@Transactional
+public class AttendanceReportService {
+
+    // Standard workday in minutes (8 hours).
+    private static final int DEFAULT_STANDARD_MINUTES = 480;
+
+    private final AttendanceReportRepository reportRepo;
+    private final HolidayRepository          holidayRepo;   // Phase 22 -- already built
+    private final UserRepository             userRepo;
+
+    public AttendanceReportService(AttendanceReportRepository reportRepo,
+                                   HolidayRepository holidayRepo,
+                                   UserRepository userRepo) {
+        this.reportRepo  = reportRepo;
+        this.holidayRepo = holidayRepo;
+        this.userRepo    = userRepo;
+    }
+
+    // ---- CREATE -------------------------------------------------------------
+
+    public AttendanceReportResponse createReport(Long userId, AttendanceReportRequest req) {
+        validate(req, /* excludeId */ null, userId);
+        AttendanceReport report = new AttendanceReport();
+        applyRequest(report, userId, req);
+        return AttendanceReportResponse.from(reportRepo.save(report));
+    }
+
+    // ---- EDIT ---------------------------------------------------------------
+
+    public AttendanceReportResponse editReport(Long reportId, AttendanceReportRequest req) {
+        AttendanceReport report = getOrThrow(reportId);
+        validate(req, reportId, report.getUserId());
+        applyRequest(report, report.getUserId(), req);
+        return AttendanceReportResponse.from(reportRepo.save(report));
+    }
+
+    // ---- DELETE -------------------------------------------------------------
+
+    public void deleteReport(Long reportId) {
+        reportRepo.delete(getOrThrow(reportId));
+    }
+
+    // ---- DAY QUERY ----------------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public List<AttendanceReportResponse> getReportsForDay(Long userId, LocalDate date) {
+        return reportRepo
+            .findByUserIdAndReportDateOrderByEntryTimeAscIdAsc(userId, date)
+            .stream().map(AttendanceReportResponse::from).toList();
+    }
+
+    // ---- MONTHLY CALENDAR ---------------------------------------------------
+
+    /**
+     * Returns a full monthly calendar for one user.
+     *
+     * Israeli workweek: Sunday-Thursday.  Friday and Saturday are non-work days
+     * (standardMinutes = 0 on those days).  Holiday credit comes from the holidays
+     * table populated by IsraeliHolidayService (Phase 24).
+     */
+    @Transactional(readOnly = true)
+    public MonthlyCalendarResponse getMonthlyCalendar(Long userId, int year, int month) {
+        YearMonth yearMonth = YearMonth.of(year, month);
+        LocalDate from      = yearMonth.atDay(1);
+        LocalDate to        = yearMonth.atEndOfMonth();
+
+        // 1. All manual reports for the month -- one DB round-trip
+        List<AttendanceReport> reports = reportRepo.findByUserIdAndDateRange(userId, from, to);
+        Map<LocalDate, List<AttendanceReport>> byDate = reports.stream()
+            .collect(Collectors.groupingBy(
+                AttendanceReport::getReportDate, LinkedHashMap::new, Collectors.toList()));
+
+        // 2. Holidays for the month -- one DB round-trip (Phase 22 repo reused)
+        Map<LocalDate, Holiday> holidayMap =
+            holidayRepo.findByDateBetween(from, to).stream()
+                       .collect(Collectors.toMap(Holiday::getDate, h -> h, (a, b) -> a));
+
+        // 3. Resolve display name
+        String username = userRepo.findById(userId)
+            .map(User::getUsername).orElse("unknown");
+
+        // 4. Build one DayCalendarEntry per calendar day
+        List<DayCalendarEntry> days = new ArrayList<>();
+        int totalWorked   = 0;
+        int totalStandard = 0;
+
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            DayOfWeek dow       = d.getDayOfWeek();
+            boolean   isWeekend = (dow == DayOfWeek.FRIDAY || dow == DayOfWeek.SATURDAY);
+            Holiday   holiday   = holidayMap.get(d);
+            boolean   isHoliday = holiday != null;
+            int       standard  = resolveStandardMinutes(isWeekend, isHoliday, holiday);
+
+            List<AttendanceReport> dayReports = byDate.getOrDefault(d, List.of());
+            int worked = computeWorkedMinutes(dayReports, standard);
+
+            days.add(new DayCalendarEntry(
+                d,
+                dayReports.stream().map(AttendanceReportResponse::from).toList(),
+                worked, standard, isWeekend, isHoliday,
+                isHoliday ? holiday.getName() : null,
+                worked - standard));
+
+            totalWorked   += worked;
+            totalStandard += standard;
+        }
+
+        return new MonthlyCalendarResponse(
+            userId, username, year, month, days,
+            totalWorked, totalStandard, totalWorked - totalStandard);
+    }
+
+    // ---- PRIVATE HELPERS ----------------------------------------------------
+
+    private void validate(AttendanceReportRequest req, Long excludeId, Long userId) {
+        if (req.reportType() == AttendanceReportType.PRESENCE
+                && (req.entryTime() == null || req.exitTime() == null)) {
+            throw new AttendanceValidationException(
+                "סוג דיווח נוכחות דורש שעת כניסה ושעת יציאה");
+        }
+
+        if (req.entryTime() != null && req.exitTime() != null) {
+            int minutes = DurationCalculator.computeMinutes(req.entryTime(), req.exitTime());
+
+            if (minutes == 0) {
+                throw new AttendanceValidationException(
+                    "שעת כניסה ויציאה זהות -- המשך חייב להיות גדול מאפס");
+            }
+            if (minutes >= 24 * 60) {
+                throw new AttendanceValidationException(
+                    "משך משמרת חייב להיות קצר מ-24 שעות");
+            }
+            if (req.reportType() == AttendanceReportType.PRESENCE) {
+                checkNoPresenceOverlap(userId, req.reportDate(),
+                                       req.entryTime(), req.exitTime(),
+                                       excludeId != null ? excludeId : -1L);
+            }
+        }
+    }
+
+    /**
+     * Loads all PRESENCE reports for (userId, date), excludes the record being
+     * edited, then checks pairwise interval overlap using minute-of-day arithmetic
+     * so midnight-crossing shifts are handled correctly.
+     */
+    private void checkNoPresenceOverlap(Long userId, LocalDate date,
+                                        LocalTime entry, LocalTime exit,
+                                        Long excludeId) {
+        reportRepo.findByUserIdAndReportDateOrderByEntryTimeAscIdAsc(userId, date)
+            .stream()
+            .filter(r -> r.getReportType() == AttendanceReportType.PRESENCE)
+            .filter(r -> !r.getId().equals(excludeId))
+            .filter(r -> r.getEntryTime() != null && r.getExitTime() != null)
+            .forEach(r -> {
+                if (timeRangesOverlap(entry, exit, r.getEntryTime(), r.getExitTime())) {
+                    throw new AttendanceValidationException(
+                        "קיימת חפיפה עם דיווח נוכחות אחר באותו יום");
+                }
+            });
+    }
+
+    /**
+     * Returns true when two time ranges overlap.  Converts each range to
+     * minute-of-day [0, 2879) so midnight-crossing (entry > exit) is handled
+     * by adding 1440 to the end endpoint.
+     */
+    private boolean timeRangesOverlap(LocalTime s1, LocalTime e1,
+                                      LocalTime s2, LocalTime e2) {
+        int start1 = s1.toSecondOfDay() / 60;
+        int end1   = s1.isAfter(e1) ? e1.toSecondOfDay() / 60 + 1440
+                                    : e1.toSecondOfDay() / 60;
+        int start2 = s2.toSecondOfDay() / 60;
+        int end2   = s2.isAfter(e2) ? e2.toSecondOfDay() / 60 + 1440
+                                    : e2.toSecondOfDay() / 60;
+        return !(end1 <= start2 || end2 <= start1);
+    }
+
+    /** Populates all mutable fields from an inbound request and recomputes duration. */
+    private void applyRequest(AttendanceReport report, Long userId,
+                              AttendanceReportRequest req) {
+        report.setUserId(userId);
+        report.setReportDate(req.reportDate());
+        report.setEntryTime(req.entryTime());
+        report.setExitTime(req.exitTime());
+        report.setNote(req.note());
+        report.setReportType(req.reportType());
+        report.setEquateToStandard(req.equateToStandard());
+        report.setDurationMinutes(
+            (req.entryTime() != null && req.exitTime() != null)
+                ? DurationCalculator.computeMinutes(req.entryTime(), req.exitTime())
+                : null);
+    }
+
+    /**
+     * Resolves expected (standard) minutes for one calendar day:
+     * - Weekend (Fri/Sat): 0
+     * - Holiday on a workday: holiday.creditHours * 60
+     * - Normal workday: DEFAULT_STANDARD_MINUTES (480)
+     */
+    private int resolveStandardMinutes(boolean isWeekend, boolean isHoliday, Holiday holiday) {
+        if (isWeekend) return 0;
+        if (isHoliday) return holiday.getCreditHours()
+                                     .multiply(BigDecimal.valueOf(60)).intValue();
+        return DEFAULT_STANDARD_MINUTES;
+    }
+
+    /**
+     * Computes total "counted" minutes for one calendar day:
+     * - PRESENCE: adds actual durationMinutes
+     * - creditsStandardHours types (VACATION/SICK/RESERVE_DUTY/HOLIDAY): credits
+     *   standardMinutes once (first occurrence wins; subsequent ones are ignored)
+     * - ABSENCE: contributes 0
+     * - equateToStandard: overrides to standardMinutes, applied once
+     */
+    private int computeWorkedMinutes(List<AttendanceReport> reports, int standardMinutes) {
+        int     worked           = 0;
+        boolean standardCredited = false;
+
+        for (AttendanceReport r : reports) {
+            if (r.isEquateToStandard() && !standardCredited) {
+                worked += standardMinutes;
+                standardCredited = true;
+                continue;
+            }
+            if (r.getReportType().isCountsAsWorked() && r.getDurationMinutes() != null) {
+                worked += r.getDurationMinutes();
+            } else if (r.getReportType().isCreditsStandardHours() && !standardCredited) {
+                worked += standardMinutes;
+                standardCredited = true;
+            }
+        }
+        return worked;
+    }
+
+    private AttendanceReport getOrThrow(Long id) {
+        return reportRepo.findById(id).orElseThrow(
+            () -> new EntityNotFoundException("AttendanceReport " + id + " not found"));
+    }
+}
+```
+
+---
+
+#### BE Step F.8 — Exception and HTTP Mapping
+
+Create **`com/crm/timetracking/exception/AttendanceValidationException.java`**:
+
+```java
+public class AttendanceValidationException extends RuntimeException {
+    public AttendanceValidationException(String message) { super(message); }
+}
+```
+
+Add to the existing **`GlobalExceptionHandler`** (`@ControllerAdvice`):
+
+```java
+@ExceptionHandler(AttendanceValidationException.class)
+public ResponseEntity<ErrorResponse> handleAttendanceValidation(
+        AttendanceValidationException ex) {
+    // 422: the request is well-formed but fails semantic validation
+    return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+        .body(new ErrorResponse("ATTENDANCE_VALIDATION", ex.getMessage()));
+}
+```
+
+422 Unprocessable Entity is more precise than 400 for semantic errors on syntactically valid requests, consistent with RFC 9110.
+
+---
+
+#### BE Step F.9 — `AttendanceReportController`
+
+Create **`com/crm/timetracking/controller/AttendanceReportController.java`**:
+
+```
+@RestController @RequestMapping("/api/v1/attendance-reports")
+
+POST   /
+  Body: AttendanceReportRequest
+  Resolves userId from SecurityContext (own reports);
+  ADMIN may pass ?userId= to create on behalf of another user.
+  Returns 201 + AttendanceReportResponse
+
+GET    /?userId={id}&date={date}
+  --> attendanceReportService.getReportsForDay(userId, date)
+  Returns List<AttendanceReportResponse>
+
+GET    /calendar?userId={id}&year={y}&month={m}
+  --> attendanceReportService.getMonthlyCalendar(userId, year, month)
+  Returns MonthlyCalendarResponse
+
+PUT    /{id}
+  Body: AttendanceReportRequest
+  --> attendanceReportService.editReport(id, req)
+  Returns 200 + AttendanceReportResponse
+
+DELETE /{id}
+  --> attendanceReportService.deleteReport(id)
+  Returns 204
+```
+
+Security guard: if the calling user is not `ROLE_ADMIN` and the target `userId` differs from the authenticated user's ID, throw `AccessDeniedException` (maps to 403).
+
+---
+
+#### BE Step F.10 — Project Structure Update
+
+Add under `timetracking/` in Section 4:
+
+```
+timetracking/
+├── entity/
+│   └── AttendanceReport.java             # Phase F
+├── enums/
+│   └── AttendanceReportType.java         # Phase F
+├── repository/
+│   └── AttendanceReportRepository.java   # Phase F
+├── service/
+│   └── AttendanceReportService.java      # Phase F
+├── util/
+│   └── DurationCalculator.java           # Phase F -- midnight-crossing helper
+├── dto/
+│   ├── AttendanceReportRequest.java
+│   ├── AttendanceReportResponse.java
+│   ├── DayCalendarEntry.java
+│   └── MonthlyCalendarResponse.java
+└── controller/
+    └── AttendanceReportController.java   # Phase F
+```
+
+#### Verification Phase F
+
+1. `./mvnw compile` — no errors
+2. Start app — confirm Hibernate creates `attendance_report` with all columns and indexes
+3. `POST /api/v1/attendance-reports` with `reportType=PRESENCE, entryTime=08:00, exitTime=17:00` → confirm `durationMinutes=540`
+4. Same call with `entryTime=22:00, exitTime=00:00` → confirm `durationMinutes=120` (midnight-crossing)
+5. Second overlapping PRESENCE report for same user/day → confirm HTTP 422 with Hebrew error
+6. `POST` with `reportType=VACATION, entryTime=null, exitTime=null` → confirm 201
+7. `POST` with `reportType=PRESENCE, entryTime=null` → confirm HTTP 422
+8. `GET /api/v1/attendance-reports/calendar?userId=1&year=2026&month=6` → confirm 30 `DayCalendarEntry` items; Friday/Saturday have `standardMinutes=0`; a holiday day shows `holidayName` and `isHoliday=true`
+
+---
+
+### Phase G — Manual Attendance Reporting: Vaadin UI
+
+#### FE Step G.1 — `AttendanceCalendarView`
+
+Create **`com/crm/ui/attendance/AttendanceCalendarView.java`**:
+
+```java
+@Route(value = "attendance-calendar", layout = MainLayout.class)
+@PageTitle("דוח נוכחות | CRM")
+@PermitAll
+public class AttendanceCalendarView extends VerticalLayout {
+
+    private final AttendanceReportService reportService;
+    private final UserService             userService;
+    private final SecurityService         securityService;
+
+    private YearMonth currentMonth = YearMonth.now(ZoneId.of("Asia/Jerusalem"));
+    private Long      selectedUserId;
+
+    private final Button                 prevBtn    = new Button(VaadinIcon.ANGLE_LEFT.create());
+    private final Button                 nextBtn    = new Button(VaadinIcon.ANGLE_RIGHT.create());
+    private final H3                     monthLabel = new H3();
+    private final ComboBox<UserResponse> userCombo  = new ComboBox<>("עובד");
+    private final Div                    calGrid    = new Div();
+
+    public AttendanceCalendarView(AttendanceReportService reportService,
+                                  UserService userService,
+                                  SecurityService securityService) {
+        this.reportService   = reportService;
+        this.userService     = userService;
+        this.securityService = securityService;
+        getElement().setAttribute("dir", "rtl");
+        setPadding(true);
+        buildHeader();
+        add(calGrid);
+        initUserContext();
+    }
+
+    private void buildHeader() {
+        prevBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        nextBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        prevBtn.addClickListener(e -> navigate(-1));
+        nextBtn.addClickListener(e -> navigate(+1));
+        userCombo.setItemLabelGenerator(UserResponse::username);
+        userCombo.addValueChangeListener(e -> {
+            if (e.getValue() != null) { selectedUserId = e.getValue().id(); refresh(); }
+        });
+        HorizontalLayout nav = new HorizontalLayout(prevBtn, monthLabel, nextBtn, userCombo);
+        nav.setAlignItems(Alignment.BASELINE);
+        add(nav);
+    }
+
+    private void initUserContext() {
+        if (securityService.isAdmin()) {
+            userCombo.setItems(userService.findAll());
+        } else {
+            userCombo.setVisible(false);
+            selectedUserId = securityService.getAuthenticatedUserId();
+            refresh();
+        }
+    }
+
+    void refresh() {
+        if (selectedUserId == null) return;
+        Locale he = Locale.forLanguageTag("he");
+        monthLabel.setText(
+            currentMonth.getMonth().getDisplayName(TextStyle.FULL, he)
+            + " " + currentMonth.getYear());
+        MonthlyCalendarResponse cal = reportService.getMonthlyCalendar(
+            selectedUserId, currentMonth.getYear(), currentMonth.getMonthValue());
+        buildCalendarGrid(cal);
+    }
+
+    private void navigate(int delta) {
+        currentMonth = currentMonth.plusMonths(delta);
+        refresh();
+    }
+
+    // ---- CALENDAR GRID -------------------------------------------------------
+
+    private void buildCalendarGrid(MonthlyCalendarResponse cal) {
+        calGrid.removeAll();
+        calGrid.getStyle()
+            .set("display", "grid")
+            .set("grid-template-columns", "repeat(7, 1fr)")
+            .set("direction", "rtl")   // rightmost column = Sunday in RTL
+            .set("gap", "4px");
+
+        // RTL column order: first item rendered appears on the right.
+        // Result: Sunday (index 0) rightmost, Saturday (index 6) leftmost.
+        String[] headers = {"ראשון","שני","שלישי","רביעי","חמישי","שישי","שבת"};
+        for (String h : headers) {
+            Div cell = new Div(new Span(h));
+            cell.addClassName("calendar-header-cell");
+            calGrid.add(cell);
+        }
+
+        // Leading empty cells to align the 1st of the month with its column
+        LocalDate first       = YearMonth.of(cal.year(), cal.month()).atDay(1);
+        int       leading     = israeliDayIndex(first.getDayOfWeek());
+        for (int i = 0; i < leading; i++) calGrid.add(new Div());
+
+        for (DayCalendarEntry entry : cal.days()) calGrid.add(buildDayCell(entry));
+    }
+
+    /**
+     * Maps DayOfWeek to 0-based Israeli week index.
+     * Sunday=0 (rightmost in RTL grid), Saturday=6 (leftmost).
+     */
+    private int israeliDayIndex(DayOfWeek dow) {
+        return switch (dow) {
+            case SUNDAY    -> 0;
+            case MONDAY    -> 1;
+            case TUESDAY   -> 2;
+            case WEDNESDAY -> 3;
+            case THURSDAY  -> 4;
+            case FRIDAY    -> 5;
+            case SATURDAY  -> 6;
+        };
+    }
+
+    private Div buildDayCell(DayCalendarEntry entry) {
+        Div cell = new Div();
+        cell.addClassName("calendar-day-cell");
+        if (entry.isWeekend()) cell.addClassName("weekend");
+        if (entry.isHoliday()) cell.addClassName("holiday");
+        if (entry.deltaMinutes() < 0 && !entry.isWeekend() && !entry.isHoliday())
+            cell.addClassName("deficit");
+
+        Span dayNum = new Span(String.valueOf(entry.date().getDayOfMonth()));
+        dayNum.addClassName("day-number");
+        cell.add(dayNum);
+
+        if (entry.isHoliday()) {
+            Span hn = new Span(entry.holidayName());
+            hn.getStyle().set("font-size","0.75em").set("color","var(--lumo-primary-color)");
+            cell.add(hn);
+        }
+
+        if (entry.totalWorkedMinutes() > 0) {
+            Span total = new Span(DurationCalculator.formatMinutes(entry.totalWorkedMinutes()));
+            total.addClassName("day-total");
+            if (entry.deltaMinutes() < 0 && !entry.isWeekend())
+                total.getStyle().set("color","var(--lumo-error-color)");
+            cell.add(total);
+        }
+
+        for (AttendanceReportResponse r : entry.reports()) {
+            String chipText = r.reportTypeLabel()
+                + (r.durationFormatted() != null ? " " + r.durationFormatted() : "");
+            Span chip = new Span(chipText);
+            chip.addClassName("report-chip");
+            chip.addClickListener(ev -> openEditor(entry.date(), r));
+            cell.add(chip);
+        }
+
+        Button addBtn = new Button("+");
+        addBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        addBtn.addClickListener(ev -> openEditor(entry.date(), null));
+        cell.add(addBtn);
+
+        return cell;
+    }
+
+    private void openEditor(LocalDate date, AttendanceReportResponse existing) {
+        new AttendanceReportEditor(
+            reportService, this, selectedUserId, date, existing).open();
+    }
+}
+```
+
+---
+
+#### FE Step G.2 — `AttendanceReportEditor`
+
+Create **`com/crm/ui/attendance/AttendanceReportEditor.java`** as a `Dialog` subclass, mirroring the Hilan "דיווח נוכחות" screen:
+
+```java
+public class AttendanceReportEditor extends Dialog {
+
+    private final AttendanceReportService  service;
+    private final AttendanceCalendarView   parent;
+    private final Long                     userId;
+    private final LocalDate                reportDate;
+    private final AttendanceReportResponse editing;   // null = create mode
+
+    private final ComboBox<AttendanceReportType> typeCombo =
+                      new ComboBox<>("סוג דיווח");
+    private final TimePicker  entryPicker = new TimePicker("שעת כניסה");
+    private final TimePicker  exitPicker  = new TimePicker("שעת יציאה");
+    private final Span        totalSpan   = new Span("--");
+    private final TextArea    notesField  = new TextArea("הערות");
+    private final Checkbox    equateBox   = new Checkbox("השוואה לתקן");
+
+    private final Button saveBtn   = new Button("שמור",  VaadinIcon.CHECK.create());
+    private final Button cancelBtn = new Button("ביטול", VaadinIcon.CLOSE.create());
+    private final Button deleteBtn = new Button("מחק",   VaadinIcon.TRASH.create());
+
+    public AttendanceReportEditor(AttendanceReportService service,
+                                   AttendanceCalendarView parent,
+                                   Long userId, LocalDate reportDate,
+                                   AttendanceReportResponse editing) {
+        this.service    = service;
+        this.parent     = parent;
+        this.userId     = userId;
+        this.reportDate = reportDate;
+        this.editing    = editing;
+        build();
+        if (editing != null) populate();
+    }
+
+    private void build() {
+        setHeaderTitle(editing == null
+            ? "דיווח נוכחות חדש -- " + reportDate
+            : "עריכת דיווח -- " + reportDate);
+        getElement().setAttribute("dir", "rtl");
+        setWidth("440px");
+
+        typeCombo.setItems(AttendanceReportType.values());
+        typeCombo.setItemLabelGenerator(AttendanceReportType::getHebrewLabel);
+        typeCombo.setValue(AttendanceReportType.PRESENCE);
+        typeCombo.addValueChangeListener(e -> onTypeChange(e.getValue()));
+
+        entryPicker.setStep(Duration.ofMinutes(15));
+        exitPicker.setStep(Duration.ofMinutes(15));
+        entryPicker.addValueChangeListener(e -> recomputeTotal());
+        exitPicker.addValueChangeListener(e -> recomputeTotal());
+
+        totalSpan.getStyle().set("font-size","1.3em").set("font-weight","bold");
+        HorizontalLayout totalRow = new HorizontalLayout(new Span("סה\"כ:"), totalSpan);
+        totalRow.setAlignItems(Alignment.BASELINE);
+
+        notesField.setWidth("100%");
+        notesField.setMaxHeight("80px");
+        equateBox.setTooltipText("ה.לתקן -- קבל תקן מלא עבור יום זה ללא קשר לשעות בפועל");
+
+        saveBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        saveBtn.addClickListener(e -> doSave());
+        cancelBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        cancelBtn.addClickListener(e -> close());
+        deleteBtn.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY);
+        deleteBtn.setVisible(editing != null);
+        deleteBtn.addClickListener(e -> doDelete());
+
+        HorizontalLayout timeRow = new HorizontalLayout(entryPicker, exitPicker);
+        VerticalLayout form = new VerticalLayout(typeCombo, timeRow, totalRow,
+                                                  notesField, equateBox);
+        form.setPadding(false);
+        add(form);
+        getFooter().add(new HorizontalLayout(saveBtn, cancelBtn, deleteBtn));
+    }
+
+    // ---- LIVE TOTAL RECOMPUTATION -------------------------------------------
+
+    private void recomputeTotal() {
+        LocalTime e = entryPicker.getValue(), x = exitPicker.getValue();
+        totalSpan.setText(e != null && x != null
+            ? DurationCalculator.formatMinutes(DurationCalculator.computeMinutes(e, x))
+            : "--");
+    }
+
+    // ---- TIME FIELD VISIBILITY (hidden for absence-style types) -------------
+
+    private void onTypeChange(AttendanceReportType type) {
+        boolean needsClock = (type == AttendanceReportType.PRESENCE);
+        entryPicker.setVisible(needsClock);
+        exitPicker.setVisible(needsClock);
+        if (!needsClock) { entryPicker.clear(); exitPicker.clear(); totalSpan.setText("--"); }
+    }
+
+    // ---- POPULATE FOR EDIT --------------------------------------------------
+
+    private void populate() {
+        typeCombo.setValue(editing.reportType());
+        onTypeChange(editing.reportType());
+        entryPicker.setValue(editing.entryTime());
+        exitPicker.setValue(editing.exitTime());
+        notesField.setValue(editing.note() != null ? editing.note() : "");
+        equateBox.setValue(editing.equateToStandard());
+        recomputeTotal();
+    }
+
+    // ---- SAVE ---------------------------------------------------------------
+
+    private void doSave() {
+        AttendanceReportRequest req = new AttendanceReportRequest(
+            reportDate, entryPicker.getValue(), exitPicker.getValue(),
+            notesField.getValue().isBlank() ? null : notesField.getValue(),
+            typeCombo.getValue(), equateBox.getValue());
+        try {
+            if (editing == null) service.createReport(userId, req);
+            else                 service.editReport(editing.id(), req);
+            close();
+            parent.refresh();
+            Notification.show("הדיווח נשמר", 3000, Notification.Position.TOP_CENTER);
+        } catch (AttendanceValidationException ex) {
+            Notification n = Notification.show(
+                ex.getMessage(), 5000, Notification.Position.TOP_CENTER);
+            n.addThemeVariants(NotificationVariant.LUMO_ERROR);
+        }
+    }
+
+    // ---- DELETE -------------------------------------------------------------
+
+    private void doDelete() {
+        ConfirmDialog dlg = new ConfirmDialog(
+            "מחיקת דיווח", "האם למחוק את הדיווח? לא ניתן לבטל פעולה זו.",
+            "מחק", ev -> {
+                service.deleteReport(editing.id());
+                close();
+                parent.refresh();
+                Notification.show("הדיווח נמחק", 3000, Notification.Position.TOP_CENTER);
+            },
+            "ביטול", ev -> {});
+        dlg.setConfirmButtonTheme("error primary");
+        dlg.open();
+    }
+}
+```
+
+---
+
+#### FE Step G.3 — Navigation
+
+Add under the Time Clock group in **`MainLayout.createDrawer()`**:
+
+```java
+SideNavItem timeClock = new SideNavItem("Time Clock");
+timeClock.setPrefixComponent(VaadinIcon.CLOCK.create());
+timeClock.addItem(new SideNavItem(
+    "דוח נוכחות",
+    AttendanceCalendarView.class,
+    VaadinIcon.CALENDAR.create()));
+nav.addItem(timeClock);
+```
+
+---
+
+#### FE Step G.4 — CSS
+
+Add to `src/main/frontend/themes/crm/styles.css`:
+
+```css
+/* ---- Attendance Calendar ----------------------------------------- */
+.calendar-header-cell {
+    text-align: center;
+    font-size: 0.78em;
+    font-weight: bold;
+    color: var(--lumo-secondary-text-color);
+    padding: 4px 0;
+    border-bottom: 2px solid var(--lumo-contrast-20pct);
+}
+.calendar-day-cell {
+    border: 1px solid var(--lumo-contrast-10pct);
+    border-radius: var(--lumo-border-radius-s);
+    padding: 4px 6px;
+    min-height: 82px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+.calendar-day-cell.weekend { background: var(--lumo-contrast-5pct); }
+.calendar-day-cell.holiday { background: var(--lumo-primary-color-10pct); }
+.calendar-day-cell.deficit { border-color: var(--lumo-error-color-50pct); }
+.day-number {
+    font-size: 0.82em;
+    font-weight: bold;
+    color: var(--lumo-secondary-text-color);
+    align-self: flex-end;
+}
+.day-total { font-size: 0.9em; }
+.report-chip {
+    background: var(--lumo-primary-color-10pct);
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 0.78em;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.report-chip:hover { background: var(--lumo-primary-color-50pct); }
+```
+
+---
+
+#### Verification Phase G
+
+1. Navigate to http://localhost:9080/attendance-calendar
+2. Confirm month header shows correct Hebrew name (e.g., "יוני 2026")
+3. Confirm day 1 of the month lands under the correct column in RTL layout
+4. Click "+" on a Thursday cell → `AttendanceReportEditor` opens
+5. Type נוכחות, entry `08:00`, exit `17:00` → confirm **סה"כ** shows **9:00** live
+6. Change exit to `00:30` with entry `22:00` → confirm **סה"כ** shows **2:30** (midnight-crossing)
+7. Save → calendar cell gains chip "נוכחות 2:30" without page reload
+8. Try adding a second overlapping PRESENCE for the same day → confirm Hebrew error notification
+9. Change type to חופשה → confirm time pickers hide and total shows "--"
+10. Save the vacation report → chip shows "חופשה" with no time suffix
+11. Click the chip → editor opens pre-populated with saved data
+12. Click מחק → ConfirmDialog appears; confirm → chip removed, calendar refreshes
+13. Navigate prev/next month with arrows → grid re-renders for the new month
+14. As admin: switch employee selector → calendar reloads for the selected employee
+
+---
+
+#### Migration Notes
+
+**Flyway scripts** (apply in order before deploying in production):
+
+```
+V2.2.0__create_attendance_report_table.sql    -- table, indexes, updated_at trigger
+V2.2.1__add_report_type_check_constraint.sql  -- CHECK constraint for report_type values
+```
+
+In development (`ddl-auto=update`) Hibernate creates the table automatically. Flyway is activated only when `spring.flyway.enabled=true` (the `postgres`/`prod` profile). Store these under `src/main/resources/db/migration/` alongside the Phase 21 scripts (`V2.0.0`, `V2.0.1`).
+
+---
+
+#### Coexistence with Phase C Punch-In/Out Clock
+
+| Concern | Phase C -- Clock | Phase F -- Manual Reports |
+|---|---|---|
+| Storage table | `attendance` | `attendance_report` |
+| Trigger | Employee hardware/UI clock | HR or employee manual entry |
+| Cardinality | 1 open row per user max | Multiple rows per (user_id, date) |
+| Time columns | `TIMESTAMP WITH TIME ZONE` | `DATE` + `TIME` (no TZ) |
+| Midnight handling | Not applicable (absolute timestamps) | `DurationCalculator.computeMinutes` |
+| Constraint | Partial unique index on `end_time IS NULL` | Service-layer overlap check |
+| Monthly query entry point | `AttendanceService.getMonthlyRecords` | `AttendanceReportService.getMonthlyCalendar` |
+
+A single employee may simultaneously have a clock session (from `attendance`) and a manual report (from `attendance_report`) for the same day -- for example, a morning worked via punch clock plus an afternoon `RESERVE_DUTY` record entered manually. The two services read their respective tables and remain independent data products.
+
+---
+
+#### Integration with Phase E Monthly Excel Report
+
+Extend **`ExcelReportService.generateMonthlyReport`** signature:
+
+```java
+public byte[] generateMonthlyReport(
+        List<Attendance>       clockRecords,    // Phase C -- unchanged parameter
+        List<AttendanceReport> manualReports,   // Phase F -- new parameter
+        Map<Long, String>      userNames,
+        String                 monthLabel) throws IOException
+```
+
+Inside the method, add a new sheet **"דיווחי נוכחות"** with columns:
+
+```
+עובד | תאריך | שעת כניסה | שעת יציאה | משך (ד"ש) | סוג דיווח | הערות | השוואה לתקן
+```
+
+Also extend the **Summary** sheet with two new columns per employee row:
+- **"דיווחים ידניים"** — count of `AttendanceReport` rows for that employee
+- **"שעות ידניות"** — sum of PRESENCE `durationMinutes` / 60, formatted via `DurationCalculator.formatMinutes`
+
+Extend **`MonthlyReportJob`** to load manual reports alongside clock records:
+
+```java
+LocalDate fromDate = lastMonth.atDay(1);
+LocalDate toDate   = lastMonth.atEndOfMonth();
+
+List<AttendanceReport> manualReports =
+    attendanceReportRepo.findAllByDateRange(fromDate, toDate);
+
+byte[] excel = excelService.generateMonthlyReport(
+    clockRecords, manualReports, names, label);
+```
+
+The accountant receives a single `.xlsx` file that consolidates clock-session sheets (Phase 25), the new manual-reports sheet, and a Summary that aggregates both sources per employee.
