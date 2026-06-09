@@ -18,12 +18,16 @@ public class TimeClockBootstrap {
     @Bean
     ApplicationRunner bootstrapHolidays(IsraeliHolidayService svc, HolidayRepository repo) {
         return args -> {
-            int year = LocalDate.now().getYear();
-            if (repo.findByYearAndCountry((short) year, "IL").isEmpty()) {
-                log.info("Bootstrapping Israeli holidays for {} and {}", year, year + 1);
-                svc.generateHolidaysForYear(year);
-                svc.generateHolidaysForYear(year + 1);
-                log.info("Israeli holiday bootstrap complete.");
+            try {
+                int year = LocalDate.now().getYear();
+                if (repo.findByYearAndCountry((short) year, "IL").isEmpty()) {
+                    log.info("Bootstrapping Israeli holidays for {} and {}", year, year + 1);
+                    svc.generateHolidaysForYear(year);
+                    svc.generateHolidaysForYear(year + 1);
+                    log.info("Israeli holiday bootstrap complete.");
+                }
+            } catch (Exception e) {
+                log.error("Holiday bootstrap failed — app will continue without holidays: {}", e.getMessage());
             }
         };
     }

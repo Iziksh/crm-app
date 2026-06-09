@@ -15,4 +15,9 @@ FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 COPY --from=build /app/target/crm-app-1.0.0-SNAPSHOT.jar app.jar
 EXPOSE 9080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
+ENTRYPOINT ["java", \
+  "-Xms128m", "-Xmx384m", \
+  "-XX:+UseG1GC", \
+  "-XX:MaxGCPauseMillis=200", \
+  "-Xss256k", \
+  "-jar", "app.jar"]
