@@ -4,6 +4,7 @@ import com.crm.domain.entity.NotificationConfig;
 import com.crm.domain.entity.Topic;
 import com.crm.domain.entity.User;
 import com.crm.domain.entity.Workspace;
+import com.crm.config.performance.StartupPerformanceProfiler;
 import com.crm.repository.NotificationConfigRepository;
 import com.crm.repository.TopicRepository;
 import com.crm.repository.UserRepository;
@@ -16,7 +17,9 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 public class DataInitializer implements ApplicationRunner {
@@ -47,6 +50,10 @@ public class DataInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        StartupPerformanceProfiler.time("phase.data-initializer", () -> runInternal(args));
+    }
+
+    private void runInternal(ApplicationArguments args) {
         User admin;
         if (!userRepository.existsByUsername("admin")) {
             admin = new User();
@@ -56,19 +63,7 @@ public class DataInitializer implements ApplicationRunner {
             admin.setRoles(Set.of("ROLE_USER", "ROLE_ADMIN"));
             admin = userRepository.save(admin);
         } else {
-            admin = userRepository.findByUsername("admin").orElseThrow();
-            // Keep email in sync with app.admin.email
-            if (!adminEmail.equals(admin.getEmail())) {
-                // If another user owns this email, move them to a placeholder first
-                userRepository.findByEmail(adminEmail).ifPresent(other -> {
-                    if (!other.getUsername().equals("admin")) {
-                        other.setEmail(other.getUsername() + "@crm.internal");
-                        userRepository.save(other);
-                    }
-                });
-                admin.setEmail(adminEmail);
-                admin = userRepository.save(admin);
-            }
+            admin = syncConfiguredEmail("admin", adminEmail);
         }
 
         if (!userRepository.existsByUsername("VladiK")) {
@@ -78,6 +73,8 @@ public class DataInitializer implements ApplicationRunner {
             vladik.setPassword(passwordEncoder.encode("admin123"));
             vladik.setRoles(Set.of("ROLE_USER", "ROLE_ADMIN"));
             userRepository.save(vladik);
+        } else {
+            syncConfiguredEmail("VladiK", admin2Email);
         }
 
         if (workspaceRepository.count() == 0) {
@@ -89,11 +86,29 @@ public class DataInitializer implements ApplicationRunner {
             workspaceRepository.save(defaultWs);
         }
 
-        seedTopics();
-        seedNotificationConfigs();
+        StartupPerformanceProfiler.time("phase.data-initializer.topics", this::seedTopics);
+        StartupPerformanceProfiler.time("phase.data-initializer.notification-configs", this::seedNotificationConfigs);
+    }
+
+    private User syncConfiguredEmail(String username, String targetEmail) {
+        User user = userRepository.findByUsername(username).orElseThrow();
+        if (targetEmail == null || targetEmail.isBlank() || targetEmail.equals(user.getEmail())) {
+            return user;
+        }
+        userRepository.findByEmail(targetEmail).ifPresent(other -> {
+            if (!other.getUsername().equalsIgnoreCase(username)) {
+                other.setEmail(other.getUsername() + "@crm.internal");
+                userRepository.save(other);
+            }
+        });
+        user.setEmail(targetEmail);
+        return userRepository.save(user);
     }
 
     private void seedTopics() {
+        Map<String, Topic> existingByName = topicRepository.findAll().stream()
+                .collect(Collectors.toMap(Topic::getName, t -> t, (a, b) -> a));
+
         // FSD §1 — all 32 topics (topicKey, name, entityType, sendMail)
         List<String[]> topics = List.of(
             // Lead topics
@@ -152,26 +167,26 @@ public class DataInitializer implements ApplicationRunner {
             String entity    = row[2];
             boolean sendMail = Boolean.parseBoolean(row[3]);
 
-            if (!topicRepository.existsByName(name)) {
+            if (!existingByName.containsKey(name)) {
                 Topic t = new Topic();
                 t.setTopicKey(topicKey);
                 t.setName(name);
                 t.setEntityType(entity);
                 t.setSendMailEnabled(sendMail);
-                topicRepository.save(t);
+                existingByName.put(name, topicRepository.save(t));
             } else if (topicKey != null) {
-                // Update existing topic with topicKey if not yet set
-                topicRepository.findByName(name).ifPresent(existing -> {
-                    if (existing.getTopicKey() == null) {
-                        existing.setTopicKey(topicKey);
-                        topicRepository.save(existing);
-                    }
-                });
+                Topic existing = existingByName.get(name);
+                if (existing.getTopicKey() == null) {
+                    existing.setTopicKey(topicKey);
+                    topicRepository.save(existing);
+                }
             }
         }
     }
 
     private void seedNotificationConfigs() {
+        Set<String> existingKeys = configRepository.findGlobalTopicKeys();
+
         // Default global configs per FSD §4.5 thresholds
         List<Object[]> configs = List.of(
             // {topicKey, stagnantDays, highValueThreshold, expiryWarningDays, dormancyDays, enabled}
@@ -193,7 +208,7 @@ public class DataInitializer implements ApplicationRunner {
 
         for (Object[] row : configs) {
             String topicKey = (String) row[0];
-            if (!configRepository.existsByTopicKeyAndWorkspaceIdIsNull(topicKey)) {
+            if (!existingKeys.contains(topicKey)) {
                 NotificationConfig cfg = new NotificationConfig();
                 cfg.setTopicKey(topicKey);
                 cfg.setWorkspaceId(null);
@@ -203,6 +218,7 @@ public class DataInitializer implements ApplicationRunner {
                 cfg.setExpiryWarningDays((Integer) row[3]);
                 cfg.setDormancyDays((Integer) row[4]);
                 configRepository.save(cfg);
+                existingKeys.add(topicKey);
             }
         }
     }

@@ -2,6 +2,7 @@ package com.crm.ui;
 
 
 
+import com.crm.config.performance.StartupPerformanceProfiler;
 import com.crm.dto.response.AlertResponse;
 
 import com.crm.dto.response.UserSummaryResponse;
@@ -130,7 +131,7 @@ public class MainLayout extends AppLayout {
 
         });
 
-        refreshBellCount();
+        StartupPerformanceProfiler.time("phase.main-layout.attach", this::refreshBellCount);
 
     }
 
@@ -138,7 +139,8 @@ public class MainLayout extends AppLayout {
 
     private void refreshBellCount() {
 
-        long count = alertService.countUnread(securityService.getUsername());
+        long count = StartupPerformanceProfiler.time("dashboard.db.alertCountUnread",
+                () -> alertService.countUnread(securityService.getUsername()));
 
         getUI().ifPresent(ui -> ui.access(() -> {
 

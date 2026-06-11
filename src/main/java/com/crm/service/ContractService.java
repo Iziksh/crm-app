@@ -80,6 +80,11 @@ public class ContractService {
                 .stream().map(ContractResponse::from).toList();
     }
 
+    @Transactional(readOnly = true)
+    public long countExpiringWithin(int days) {
+        return contractRepository.countByEndDateBefore(LocalDate.now().plusDays(days));
+    }
+
     public ContractResponse update(Long id, ContractRequest request) {
         return ContractResponse.from(contractRepository.save(mapToEntity(getOrThrow(id), request)));
     }

@@ -113,8 +113,11 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
         langRow.setWidthFull();
         langRow.setJustifyContentMode(FlexComponent.JustifyContentMode.END);
 
-        String maskedEmail = maskEmail(pendingEmail);
-        Paragraph hint = new Paragraph(i18n.translate("auth.otpSent", maskedEmail));
+        Span emailHint = new Span(maskEmail(pendingEmail));
+        emailHint.getElement().setAttribute("dir", "ltr");
+        emailHint.getStyle().set("unicode-bidi", "isolate");
+        Paragraph hint = new Paragraph(i18n.translate("auth.otpSentPrefix") + " ");
+        hint.add(emailHint);
         hint.getStyle().set("color", "#555").set("font-size", "14px").set("margin", "0");
 
         errorMsg.getStyle().set("color", "#d32f2f").set("font-size", "14px");
@@ -217,12 +220,18 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
     }
 
     private String maskEmail(String email) {
-        if (email == null) return i18n.translate("auth.yourEmail");
+        if (email == null) {
+            return i18n.translate("auth.yourEmail");
+        }
         int at = email.indexOf('@');
-        if (at <= 1) return email;
+        if (at <= 1) {
+            return email;
+        }
         String local = email.substring(0, at);
         String domain = email.substring(at);
-        if (local.length() <= 2) return local.charAt(0) + "***" + domain;
+        if (local.length() <= 2) {
+            return local.charAt(0) + "***" + domain;
+        }
         return local.charAt(0) + "*".repeat(local.length() - 2) + local.charAt(local.length() - 1) + domain;
     }
 }

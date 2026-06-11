@@ -244,6 +244,31 @@
             <build>
                 <plugins>
                     <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>enforce-java-for-vaadin-production-build</id>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <requireJavaVersion>
+                                            <version>[17,22)</version>
+                                            <message>
+                                                Production build (-Pproduction) requires JDK 17 or 21.
+                                                Vaadin build-frontend does not support JDK 22+ (you are on JDK 25).
+                                                Set JAVA_HOME to a JDK 17/21 install, e.g.:
+                                                $env:JAVA_HOME = "C:\Program Files\Java\jdk-17.0.5"
+                                            </message>
+                                        </requireJavaVersion>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
                         <groupId>com.vaadin</groupId>
                         <artifactId>vaadin-maven-plugin</artifactId>
                         <version>${vaadin.version}</version>
