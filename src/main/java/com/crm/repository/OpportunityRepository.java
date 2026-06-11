@@ -25,6 +25,9 @@ public interface OpportunityRepository extends JpaRepository<Opportunity, Long>,
     List<Opportunity> findByStageNot(OpportunityStage stage);
     long countByStage(OpportunityStage stage);
 
+    @Query("SELECT o.stage, COUNT(o) FROM Opportunity o GROUP BY o.stage")
+    List<Object[]> countGroupByStage();
+
     @Query("SELECT SUM(o.amount) FROM Opportunity o WHERE o.stage != 'LOST'")
     BigDecimal sumPipelineAmount();
 

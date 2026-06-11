@@ -9,6 +9,7 @@ import com.crm.exception.BadRequestException;
 import com.crm.exception.DuplicateEmailException;
 import com.crm.exception.ResourceNotFoundException;
 import com.crm.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -24,15 +26,60 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final String adminEmail;
+    private final String admin2Email;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public UserService(UserRepository userRepository,
+                       PasswordEncoder passwordEncoder,
+                       @Value("${app.admin.email:}") String adminEmail,
+                       @Value("${app.admin2.email:}") String admin2Email) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.adminEmail = adminEmail;
+        this.admin2Email = admin2Email;
     }
 
     @Transactional(readOnly = true)
-    public java.util.Optional<String> findEmailByUsername(String username) {
+    public Optional<String> findEmailByUsername(String username) {
         return userRepository.findByUsername(username).map(User::getEmail);
+    }
+
+    /**
+     * Returns the real inbox address for OTP and device trust.
+     * Skips internal placeholders ({@code username@crm.internal}) created when
+     * an admin email is reclaimed, and falls back to configured admin addresses.
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> findDeliverableEmailByUsername(String username) {
+        return userRepository.findByUsername(username).flatMap(user -> {
+            String stored = user.getEmail();
+            if (isDeliverable(stored)) {
+                return Optional.of(stored);
+            }
+            String configured = configuredEmailForUsername(username);
+            if (isDeliverable(configured)) {
+                return Optional.of(configured);
+            }
+            return Optional.empty();
+        });
+    }
+
+    public static boolean isPlaceholderEmail(String email) {
+        return email != null && email.endsWith("@crm.internal");
+    }
+
+    private static boolean isDeliverable(String email) {
+        return email != null && !email.isBlank() && !isPlaceholderEmail(email);
+    }
+
+    private String configuredEmailForUsername(String username) {
+        if ("admin".equalsIgnoreCase(username)) {
+            return adminEmail;
+        }
+        if ("VladiK".equalsIgnoreCase(username)) {
+            return admin2Email;
+        }
+        return null;
     }
 
     @Transactional(readOnly = true)

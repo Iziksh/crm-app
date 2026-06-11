@@ -21,6 +21,9 @@ public interface ActivityRepository extends JpaRepository<Activity, Long>, JpaSp
     List<Activity> findByContact_Id(Long contactId);
     long countByStatus(ActivityStatus status);
 
+    @Query("SELECT a.status, COUNT(a) FROM Activity a GROUP BY a.status")
+    List<Object[]> countGroupByStatus();
+
     // T-02: Activities due on a specific date, not resolved
     @Query("SELECT a FROM Activity a WHERE a.dueDate = :dueDate AND a.status NOT IN :excluded AND a.assignedTo IS NOT NULL")
     List<Activity> findDueOn(@Param("dueDate") LocalDate dueDate, @Param("excluded") List<ActivityStatus> excluded);

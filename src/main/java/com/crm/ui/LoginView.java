@@ -146,7 +146,7 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver, Ha
         }
 
         UserDetails userDetails = (UserDetails) auth.getPrincipal();
-        String email = userService.findEmailByUsername(userDetails.getUsername()).orElse(null);
+        String email = userService.findDeliverableEmailByUsername(userDetails.getUsername()).orElse(null);
 
         if (email == null) {
             showError(i18n.translate("auth.noEmail"));

@@ -29,6 +29,9 @@ types.d.ts
 *.log
 logs/
 
+# Local H2 database files (dev profile)
+data/
+
 # OS
 .DS_Store
 Thumbs.db
