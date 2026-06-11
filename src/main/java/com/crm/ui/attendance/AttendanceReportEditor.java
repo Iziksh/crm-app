@@ -1,5 +1,6 @@
 package com.crm.ui.attendance;
 
+import com.crm.service.TranslationService;
 import com.crm.timetracking.dto.AttendanceReportRequest;
 import com.crm.timetracking.dto.AttendanceReportResponse;
 import com.crm.timetracking.enums.AttendanceReportType;
@@ -28,28 +29,31 @@ import java.time.LocalTime;
 
 public class AttendanceReportEditor extends Dialog {
 
-    private final AttendanceReportService  service;
-    private final AttendanceCalendarView   parent;
-    private final Long                     userId;
-    private final LocalDate                reportDate;
-    private final AttendanceReportResponse editing;   // null = create mode
+    private final AttendanceReportService service;
+    private final TranslationService      i18n;
+    private final AttendanceCalendarView  parent;
+    private final Long                    userId;
+    private final LocalDate               reportDate;
+    private final AttendanceReportResponse editing;
 
-    private final ComboBox<AttendanceReportType> typeCombo   = new ComboBox<>("סוג דיווח");
-    private final TimePicker                     entryPicker = new TimePicker("שעת כניסה");
-    private final TimePicker                     exitPicker  = new TimePicker("שעת יציאה");
-    private final Span                           totalSpan   = new Span("--");
-    private final TextArea                       notesField  = new TextArea("הערות");
-    private final Checkbox                       equateBox   = new Checkbox("השוואה לתקן");
+    private final ComboBox<AttendanceReportType> typeCombo   = new ComboBox<>();
+    private final TimePicker                     entryPicker = new TimePicker();
+    private final TimePicker                     exitPicker  = new TimePicker();
+    private final Span                           totalSpan   = new Span();
+    private final TextArea                       notesField  = new TextArea();
+    private final Checkbox                       equateBox   = new Checkbox();
 
-    private final Button saveBtn   = new Button("שמור",  VaadinIcon.CHECK.create());
-    private final Button cancelBtn = new Button("ביטול", VaadinIcon.CLOSE.create());
-    private final Button deleteBtn = new Button("מחק",   VaadinIcon.TRASH.create());
+    private final Button saveBtn   = new Button(VaadinIcon.CHECK.create());
+    private final Button cancelBtn = new Button(VaadinIcon.CLOSE.create());
+    private final Button deleteBtn = new Button(VaadinIcon.TRASH.create());
 
     public AttendanceReportEditor(AttendanceReportService service,
+                                  TranslationService i18n,
                                   AttendanceCalendarView parent,
                                   Long userId, LocalDate reportDate,
                                   AttendanceReportResponse editing) {
         this.service     = service;
+        this.i18n        = i18n;
         this.parent      = parent;
         this.userId      = userId;
         this.reportDate  = reportDate;
@@ -60,29 +64,36 @@ public class AttendanceReportEditor extends Dialog {
 
     private void build() {
         setHeaderTitle(editing == null
-                ? "דיווח נוכחות חדש — " + reportDate
-                : "עריכת דיווח — " + reportDate);
-        getElement().setAttribute("dir", "rtl");
+                ? i18n.translate("view.attendanceReportEditor.title.new", reportDate)
+                : i18n.translate("view.attendanceReportEditor.title.edit", reportDate));
         setWidth("440px");
 
+        typeCombo.setLabel(i18n.translate("view.attendanceReportEditor.field.reportType"));
         typeCombo.setItems(AttendanceReportType.values());
-        typeCombo.setItemLabelGenerator(AttendanceReportType::getHebrewLabel);
+        typeCombo.setItemLabelGenerator(i18n::translateEnum);
         typeCombo.setValue(AttendanceReportType.PRESENCE);
         typeCombo.setWidthFull();
         typeCombo.addValueChangeListener(e -> onTypeChange(e.getValue()));
 
+        entryPicker.setLabel(i18n.translate("view.attendanceReportEditor.field.entryTime"));
+        exitPicker.setLabel(i18n.translate("view.attendanceReportEditor.field.exitTime"));
         entryPicker.setStep(Duration.ofMinutes(15));
         exitPicker.setStep(Duration.ofMinutes(15));
         entryPicker.addValueChangeListener(e -> recomputeTotal());
         exitPicker.addValueChangeListener(e -> recomputeTotal());
 
+        totalSpan.setText(i18n.translate("view.attendanceReportEditor.total.empty"));
         totalSpan.getStyle().set("font-size", "1.3em").set("font-weight", "bold");
-        HorizontalLayout totalRow = new HorizontalLayout(new Span("סה\"כ:"), totalSpan);
+        HorizontalLayout totalRow = new HorizontalLayout(
+                new Span(i18n.translate("view.attendanceReportEditor.total.label")), totalSpan);
         totalRow.setAlignItems(FlexComponent.Alignment.BASELINE);
         totalRow.setSpacing(true);
 
+        notesField.setLabel(i18n.translate("view.attendanceReportEditor.field.notes"));
         notesField.setWidthFull();
         notesField.setMaxHeight("80px");
+
+        equateBox.setLabel(i18n.translate("view.attendanceReportEditor.equateToStandard"));
 
         HorizontalLayout timeRow = new HorizontalLayout(entryPicker, exitPicker);
         timeRow.setSpacing(true);
@@ -93,20 +104,21 @@ public class AttendanceReportEditor extends Dialog {
         form.setSpacing(true);
         add(form);
 
+        saveBtn.setText(i18n.translate("common.save"));
         saveBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         saveBtn.addClickListener(e -> doSave());
 
+        cancelBtn.setText(i18n.translate("common.cancel"));
         cancelBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         cancelBtn.addClickListener(e -> close());
 
+        deleteBtn.setText(i18n.translate("common.delete"));
         deleteBtn.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY);
         deleteBtn.setVisible(editing != null);
         deleteBtn.addClickListener(e -> doDelete());
 
         getFooter().add(new HorizontalLayout(saveBtn, cancelBtn, deleteBtn));
     }
-
-    // ── Type visibility ───────────────────────────────────────────────────────
 
     private void onTypeChange(AttendanceReportType type) {
         boolean needsClock = (type == AttendanceReportType.PRESENCE);
@@ -115,21 +127,17 @@ public class AttendanceReportEditor extends Dialog {
         if (!needsClock) {
             entryPicker.clear();
             exitPicker.clear();
-            totalSpan.setText("--");
+            totalSpan.setText(i18n.translate("view.attendanceReportEditor.total.empty"));
         }
     }
-
-    // ── Live total ────────────────────────────────────────────────────────────
 
     private void recomputeTotal() {
         LocalTime e = entryPicker.getValue();
         LocalTime x = exitPicker.getValue();
         totalSpan.setText(e != null && x != null
                 ? DurationCalculator.formatMinutes(DurationCalculator.computeMinutes(e, x))
-                : "--");
+                : i18n.translate("view.attendanceReportEditor.total.empty"));
     }
-
-    // ── Populate for edit ─────────────────────────────────────────────────────
 
     private void populate() {
         typeCombo.setValue(editing.reportType());
@@ -141,12 +149,10 @@ public class AttendanceReportEditor extends Dialog {
         recomputeTotal();
     }
 
-    // ── Save ──────────────────────────────────────────────────────────────────
-
     private void doSave() {
         AttendanceReportType type = typeCombo.getValue();
         if (type == null) {
-            showError("יש לבחור סוג דיווח");
+            showError(i18n.translate("view.attendanceReportEditor.error.typeRequired"));
             return;
         }
         AttendanceReportRequest req = new AttendanceReportRequest(
@@ -161,7 +167,8 @@ public class AttendanceReportEditor extends Dialog {
             else                 service.editReport(editing.id(), req);
             close();
             parent.refresh();
-            Notification.show("הדיווח נשמר", 3000, Notification.Position.TOP_CENTER);
+            Notification.show(i18n.translate("notification.attendanceReportEditor.saved"),
+                    3000, Notification.Position.TOP_CENTER);
         } catch (AttendanceValidationException ex) {
             showError(ex.getMessage());
         } catch (Exception ex) {
@@ -169,19 +176,18 @@ public class AttendanceReportEditor extends Dialog {
         }
     }
 
-    // ── Delete ────────────────────────────────────────────────────────────────
-
     private void doDelete() {
         ConfirmDialog dlg = new ConfirmDialog(
-                "מחיקת דיווח",
-                "האם למחוק את הדיווח? לא ניתן לבטל פעולה זו.",
-                "מחק", ev -> {
+                i18n.translate("dialog.attendanceReportEditor.delete.title"),
+                i18n.translate("dialog.attendanceReportEditor.delete.message"),
+                i18n.translate("common.delete"), ev -> {
                     service.deleteReport(editing.id());
                     close();
                     parent.refresh();
-                    Notification.show("הדיווח נמחק", 3000, Notification.Position.TOP_CENTER);
+                    Notification.show(i18n.translate("notification.attendanceReportEditor.deleted"),
+                            3000, Notification.Position.TOP_CENTER);
                 },
-                "ביטול", ev -> {});
+                i18n.translate("common.cancel"), ev -> {});
         dlg.setConfirmButtonTheme("error primary");
         dlg.open();
     }

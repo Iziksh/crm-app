@@ -6,6 +6,7 @@ import com.crm.domain.enums.ActivityType;
 import com.crm.dto.request.ActivityRequest;
 import com.crm.dto.response.ActivityResponse;
 import com.crm.service.ActivityService;
+import com.crm.service.TranslationService;
 import com.crm.service.UserService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
@@ -14,7 +15,6 @@ import com.vaadin.flow.component.datepicker.DatePicker;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
-import com.vaadin.flow.component.html.H3;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
@@ -25,37 +25,38 @@ import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.StreamResource;
 import jakarta.annotation.security.PermitAll;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.TextStyle;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Route(value = "calendar", layout = MainLayout.class)
-@PageTitle("Calendar | CRM")
 @PermitAll
-public class CalendarView extends VerticalLayout {
+public class CalendarView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final ActivityService activityService;
     private final UserService userService;
     private final SecurityService securityService;
 
     private YearMonth currentMonth = YearMonth.now();
-    private final H3 monthLabel = new H3();
+    private final com.vaadin.flow.component.html.H3 monthLabel = new com.vaadin.flow.component.html.H3();
     private final Div calendarGrid = new Div();
 
-    public CalendarView(ActivityService activityService,
+    public CalendarView(TranslationService i18n, ActivityService activityService,
                         UserService userService,
                         SecurityService securityService) {
+        this.i18n = i18n;
         this.activityService = activityService;
         this.userService = userService;
         this.securityService = securityService;
@@ -76,7 +77,7 @@ public class CalendarView extends VerticalLayout {
         });
         nextBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        Button newBtn = new Button("New Activity", VaadinIcon.PLUS.create(),
+        Button newBtn = new Button(i18n.translate("view.calendar.button.new"), VaadinIcon.PLUS.create(),
                 e -> openActivityDialog(LocalDate.now()));
         newBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
@@ -84,7 +85,7 @@ public class CalendarView extends VerticalLayout {
                 new ByteArrayInputStream(activityService.buildIcal().getBytes(StandardCharsets.UTF_8)));
         Anchor icalAnchor = new Anchor(icalResource, "");
         icalAnchor.getElement().setAttribute("download", true);
-        Button icalBtn = new Button("Download .ics", VaadinIcon.CALENDAR.create());
+        Button icalBtn = new Button(i18n.translate("view.calendar.button.downloadIcs"), VaadinIcon.CALENDAR.create());
         icalBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         icalAnchor.add(icalBtn);
 
@@ -110,9 +111,14 @@ public class CalendarView extends VerticalLayout {
         refresh();
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("pageTitle.calendar");
+    }
+
     private void refresh() {
         monthLabel.setText(
-                currentMonth.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+                currentMonth.getMonth().getDisplayName(TextStyle.FULL, i18n.getCurrentLocale())
                         + " " + currentMonth.getYear());
 
         LocalDate first = currentMonth.atDay(1);
@@ -125,8 +131,9 @@ public class CalendarView extends VerticalLayout {
 
         calendarGrid.removeAll();
 
-        // Day-of-week headers
-        for (String day : List.of("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")) {
+        for (int i = 1; i <= 7; i++) {
+            DayOfWeek dow = DayOfWeek.of(i);
+            String day = dow.getDisplayName(TextStyle.SHORT, i18n.getCurrentLocale());
             Div hdr = new Div(new Span(day));
             hdr.getStyle()
                     .set("background", "#1565c0")
@@ -138,7 +145,6 @@ public class CalendarView extends VerticalLayout {
             calendarGrid.add(hdr);
         }
 
-        // Leading empty cells (Mon=1, so offset = dayOfWeek - 1)
         int offset = first.getDayOfWeek().getValue() - 1;
         for (int i = 0; i < offset; i++) {
             calendarGrid.add(emptyCell());
@@ -150,7 +156,6 @@ public class CalendarView extends VerticalLayout {
             calendarGrid.add(buildDayCell(date, byDate.getOrDefault(date, List.of()), today));
         }
 
-        // Trailing empty cells
         int filled = offset + last.getDayOfMonth();
         int remainder = filled % 7;
         if (remainder != 0) {
@@ -199,7 +204,8 @@ public class CalendarView extends VerticalLayout {
                     .set("text-overflow", "ellipsis")
                     .set("white-space", "nowrap")
                     .set("cursor", "pointer");
-            chip.setTitle(a.title() + (a.assignedToName() != null ? " — " + a.assignedToName() : ""));
+            chip.setTitle(a.title() + (a.assignedToName() != null
+                    ? " " + i18n.translate("common.emDash") + " " + a.assignedToName() : ""));
             chip.addClickListener(e -> {
                 e.getSource().getElement().getComponent().ifPresent(c -> {}); // stop propagation workaround
                 openDetailDialog(a);
@@ -225,7 +231,8 @@ public class CalendarView extends VerticalLayout {
 
     private void openDetailDialog(ActivityResponse a) {
         Dialog dlg = new Dialog();
-        dlg.setHeaderTitle(a.type() + " — " + a.title());
+        dlg.setHeaderTitle(i18n.translate("view.calendar.dialog.detailHeader",
+                i18n.translateEnum(a.type()), a.title()));
         dlg.setWidth("420px");
 
         VerticalLayout body = new VerticalLayout();
@@ -236,15 +243,20 @@ public class CalendarView extends VerticalLayout {
             desc.getStyle().set("color", "#555").set("white-space", "pre-wrap");
             body.add(desc);
         }
-        body.add(detailRow("Status",    a.status() != null ? a.status().name() : "—"));
-        body.add(detailRow("Priority",  a.priority() != null ? a.priority().name() : "—"));
-        body.add(detailRow("Due date",  a.dueDate() != null ? a.dueDate().toString() : "—"));
-        body.add(detailRow("Assigned",  a.assignedToName() != null ? a.assignedToName() : "—"));
-        if (a.accountName() != null) body.add(detailRow("Account", a.accountName()));
-        if (a.contactName() != null) body.add(detailRow("Contact", a.contactName()));
+        String emDash = i18n.translate("common.emDash");
+        body.add(detailRow(i18n.translate("view.calendar.detail.status"),
+                a.status() != null ? i18n.translateEnum(a.status()) : emDash));
+        body.add(detailRow(i18n.translate("view.calendar.detail.priority"),
+                a.priority() != null ? i18n.translateEnum(a.priority()) : emDash));
+        body.add(detailRow(i18n.translate("view.calendar.detail.dueDate"),
+                a.dueDate() != null ? a.dueDate().toString() : emDash));
+        body.add(detailRow(i18n.translate("view.calendar.detail.assigned"),
+                a.assignedToName() != null ? a.assignedToName() : emDash));
+        if (a.accountName() != null) body.add(detailRow(i18n.translate("common.column.account"), a.accountName()));
+        if (a.contactName() != null) body.add(detailRow(i18n.translate("common.column.contact"), a.contactName()));
 
         dlg.add(body);
-        dlg.getFooter().add(new Button("Close", e -> dlg.close()));
+        dlg.getFooter().add(new Button(i18n.translate("dialog.close"), e -> dlg.close()));
         dlg.open();
     }
 
@@ -259,31 +271,33 @@ public class CalendarView extends VerticalLayout {
 
     private void openActivityDialog(LocalDate prefilledDate) {
         Dialog dlg = new Dialog();
-        dlg.setHeaderTitle("New Activity");
+        dlg.setHeaderTitle(i18n.translate("view.calendar.dialog.new"));
         dlg.setWidth("460px");
 
-        ComboBox<ActivityType> typeField = new ComboBox<>("Type");
+        ComboBox<ActivityType> typeField = new ComboBox<>(i18n.translate("common.column.type"));
         typeField.setItems(ActivityType.values());
+        typeField.setItemLabelGenerator(i18n::translateEnum);
         typeField.setValue(ActivityType.MEETING);
         typeField.setWidthFull();
 
-        TextField titleField = new TextField("Title");
+        TextField titleField = new TextField(i18n.translate("view.activities.column.title"));
         titleField.setWidthFull();
         titleField.setRequired(true);
 
-        TextArea descField = new TextArea("Description");
+        TextArea descField = new TextArea(i18n.translate("view.activities.field.description"));
         descField.setWidthFull();
 
-        DatePicker dueDateField = new DatePicker("Due Date");
+        DatePicker dueDateField = new DatePicker(i18n.translate("view.activities.column.dueDate"));
         dueDateField.setValue(prefilledDate);
         dueDateField.setWidthFull();
 
-        ComboBox<String> assignedToField = new ComboBox<>("Assigned To");
+        ComboBox<String> assignedToField = new ComboBox<>(i18n.translate("view.activities.column.assignedTo"));
         assignedToField.setItems(userService.findAll().stream().map(u -> u.username()).toList());
         assignedToField.setWidthFull();
 
-        ComboBox<ActivityPriority> priorityField = new ComboBox<>("Priority");
+        ComboBox<ActivityPriority> priorityField = new ComboBox<>(i18n.translate("view.activities.column.priority"));
         priorityField.setItems(ActivityPriority.values());
+        priorityField.setItemLabelGenerator(i18n::translateEnum);
         priorityField.setValue(ActivityPriority.MEDIUM);
         priorityField.setWidthFull();
 
@@ -293,10 +307,10 @@ public class CalendarView extends VerticalLayout {
         form.setSpacing(true);
         dlg.add(form);
 
-        Button save = new Button("Create", e -> {
+        Button save = new Button(i18n.translate("view.calendar.dialog.create"), e -> {
             if (titleField.getValue().isBlank()) {
                 titleField.setInvalid(true);
-                titleField.setErrorMessage("Title is required");
+                titleField.setErrorMessage(i18n.translate("view.activities.validation.titleRequired"));
                 return;
             }
             Long assignedToId = assignedToField.getValue() != null
@@ -317,17 +331,20 @@ public class CalendarView extends VerticalLayout {
             );
             try {
                 activityService.create(req, securityService.getUsername());
-                Notification.show("Activity created", 2000, Notification.Position.BOTTOM_CENTER)
-                        .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+                notify(i18n.translate("notification.activity.created"), false);
                 dlg.close();
                 refresh();
             } catch (Exception ex) {
-                Notification.show("Error: " + ex.getMessage(), 3000, Notification.Position.BOTTOM_CENTER)
-                        .addThemeVariants(NotificationVariant.LUMO_ERROR);
+                notify(i18n.translate("view.calendar.error", ex.getMessage()), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dlg.getFooter().add(new Button("Cancel", e -> dlg.close()), save);
+        dlg.getFooter().add(new Button(i18n.translate("dialog.cancel"), e -> dlg.close()), save);
         dlg.open();
+    }
+
+    private void notify(String msg, boolean error) {
+        Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
+        n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }
 }

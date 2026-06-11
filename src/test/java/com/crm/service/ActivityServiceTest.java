@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +41,7 @@ class ActivityServiceTest {
     @Mock NotificationService notificationService;
     @Mock CrmEventPublisher eventPublisher;
     @Mock EmailService emailService;
+    @Mock EmailLocaleResolver emailLocaleResolver;
 
     @InjectMocks ActivityService activityService;
 
@@ -97,6 +99,7 @@ class ActivityServiceTest {
         saved.setAssignedTo(assignee);
 
         when(activityRepository.save(any())).thenReturn(saved);
+        when(emailLocaleResolver.resolveForUser(assignee)).thenReturn(Locale.ENGLISH);
 
         activityService.create(
                 new ActivityRequest("Meeting prep", null, ActivityType.MEETING,
@@ -104,7 +107,7 @@ class ActivityServiceTest {
                         null, null, null, null),
                 "admin");
 
-        verify(emailService).sendActivityAssigned("bob@example.com", "Meeting prep");
+        verify(emailService).sendActivityAssigned("bob@example.com", "Meeting prep", Locale.ENGLISH);
     }
 
     @Test

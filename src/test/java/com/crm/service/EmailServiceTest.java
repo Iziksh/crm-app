@@ -8,21 +8,34 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mail.javamail.JavaMailSender;
 
-import static org.mockito.ArgumentMatchers.any;
+import java.util.Locale;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 class EmailServiceTest {
 
     @Mock JavaMailSender mailSender;
     @Mock MimeMessage mimeMessage;
+    @Mock TranslationService translationService;
+    @Mock EmailTemplateService emailTemplateService;
+    @Mock EmailLocaleResolver emailLocaleResolver;
 
     private EmailService emailService;
 
     @BeforeEach
     void setUp() {
         when(mailSender.createMimeMessage()).thenReturn(mimeMessage);
-        emailService = new EmailService(mailSender, "from@example.com");
+        when(emailLocaleResolver.resolveForEmail(anyString())).thenReturn(Locale.ENGLISH);
+        when(translationService.translate(any(Locale.class), anyString())).thenReturn("Subject");
+        when(translationService.translate(any(Locale.class), anyString(), any())).thenReturn("Instructions");
+        when(emailTemplateService.renderHtml(anyString(), any(Locale.class), anyMap())).thenReturn("<html>body</html>");
+
+        emailService = new EmailService(mailSender, "from@example.com",
+                translationService, emailTemplateService, emailLocaleResolver, 5);
     }
 
     @Test
@@ -30,10 +43,26 @@ class EmailServiceTest {
         emailService.sendOtp("to@example.com", "123456");
 
         verify(mailSender).send(mimeMessage);
+        verify(translationService).translate(Locale.ENGLISH, "email.otp.subject");
+        verify(emailTemplateService).renderHtml(eq("otp"), eq(Locale.ENGLISH), anyMap());
+    }
+
+    @Test
+    void sendOtp_usesExplicitLocale() {
+        Locale hebrew = Locale.forLanguageTag("he");
+        emailService.sendOtp("to@example.com", "123456", hebrew);
+
+        verify(translationService).translate(hebrew, "email.otp.subject");
+        verify(emailTemplateService).renderHtml(eq("otp"), eq(hebrew), anyMap());
     }
 
     @Test
     void sendActivityAssigned_sendsMimeMessage() {
+        when(translationService.translate(any(Locale.class), eq("email.activityAssigned.subject"), anyString()))
+                .thenReturn("Assigned");
+        when(emailTemplateService.renderHtml(eq("activity-assigned"), any(Locale.class), anyMap()))
+                .thenReturn("<div>assigned</div>");
+
         emailService.sendActivityAssigned("to@example.com", "Follow up with client");
 
         verify(mailSender).send(mimeMessage);
@@ -50,7 +79,6 @@ class EmailServiceTest {
     void sendOtp_doesNotThrow_whenMailSenderFails() {
         when(mailSender.createMimeMessage()).thenThrow(new RuntimeException("SMTP unavailable"));
 
-        // Should not propagate — @Async wraps in try-catch
         emailService.sendOtp("to@example.com", "123456");
 
         verify(mailSender, never()).send(any(MimeMessage.class));
@@ -61,7 +89,5 @@ class EmailServiceTest {
         doThrow(new RuntimeException("SMTP error")).when(mailSender).send(any(MimeMessage.class));
 
         emailService.sendActivityAssigned("to@example.com", "Task");
-
-        // exception swallowed — no propagation
     }
 }

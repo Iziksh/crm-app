@@ -39,6 +39,9 @@ public class User implements UserDetails {
 
     private boolean enabled = true;
 
+    @Column(length = 5)
+    private String locale;
+
     @CreatedDate
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -67,6 +70,8 @@ public class User implements UserDetails {
     public Set<String> getRoles() { return roles; }
     public void setRoles(Set<String> roles) { this.roles = roles; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public String getLocale() { return locale; }
+    public void setLocale(String locale) { this.locale = locale; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

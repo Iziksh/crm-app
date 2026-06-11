@@ -2,24 +2,30 @@ package com.crm.ui;
 
 import com.crm.service.DeviceTrustService;
 import com.crm.service.EmailService;
+import com.crm.service.LocaleService;
 import com.crm.service.OtpService;
+import com.crm.service.TranslationService;
 import com.crm.service.UserService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.dependency.CssImport;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
+import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinRequest;
 import com.vaadin.flow.server.VaadinService;
 import com.vaadin.flow.server.VaadinServletRequest;
 import com.vaadin.flow.server.VaadinSession;
+import com.vaadin.flow.server.auth.AnonymousAllowed;
 import com.vaadin.flow.theme.lumo.LumoUtility;
 import jakarta.servlet.http.Cookie;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -30,18 +36,19 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import com.vaadin.flow.server.auth.AnonymousAllowed;
 
+@CssImport("./i18n.css")
 @Route("login")
-@PageTitle("Login | CRM")
 @AnonymousAllowed
-public class LoginView extends VerticalLayout implements BeforeEnterObserver {
+public class LoginView extends VerticalLayout implements BeforeEnterObserver, HasDynamicTitle {
 
     private final AuthenticationManager authenticationManager;
     private final UserService userService;
     private final OtpService otpService;
     private final EmailService emailService;
     private final DeviceTrustService deviceTrustService;
+    private final LocaleService localeService;
+    private final TranslationService i18n;
 
     private final Span errorMsg = new Span();
 
@@ -49,12 +56,16 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver {
                      UserService userService,
                      OtpService otpService,
                      EmailService emailService,
-                     DeviceTrustService deviceTrustService) {
+                     DeviceTrustService deviceTrustService,
+                     LocaleService localeService,
+                     TranslationService i18n) {
         this.authenticationManager = authenticationManager;
         this.userService = userService;
         this.otpService = otpService;
         this.emailService = emailService;
         this.deviceTrustService = deviceTrustService;
+        this.localeService = localeService;
+        this.i18n = i18n;
 
         setSizeFull();
         setAlignItems(Alignment.CENTER);
@@ -71,35 +82,46 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver {
                 .set("flex-direction", "column")
                 .set("gap", "12px");
 
-        H2 title = new H2("CRM");
+        H2 title = new H2(i18n.translate("app.name"));
         title.addClassNames(LumoUtility.Margin.NONE, LumoUtility.TextAlignment.CENTER);
         title.getStyle().set("color", "#1565c0");
+
+        LanguageSwitcher languageSwitcher = new LanguageSwitcher(localeService, i18n, true);
+        HorizontalLayout langRow = new HorizontalLayout(languageSwitcher);
+        langRow.setWidthFull();
+        langRow.setJustifyContentMode(FlexComponent.JustifyContentMode.END);
 
         errorMsg.getStyle().set("color", "#d32f2f").set("font-size", "14px");
         errorMsg.setVisible(false);
 
-        TextField usernameField = new TextField("Username");
+        TextField usernameField = new TextField(i18n.translate("auth.username"));
         usernameField.setWidthFull();
         usernameField.setAutofocus(true);
 
-        PasswordField passwordField = new PasswordField("Password");
+        PasswordField passwordField = new PasswordField(i18n.translate("auth.password"));
         passwordField.setWidthFull();
 
-        Button loginBtn = new Button("Log in", e -> handleLogin(usernameField.getValue(), passwordField.getValue()));
+        Button loginBtn = new Button(i18n.translate("auth.login"),
+                e -> handleLogin(usernameField.getValue(), passwordField.getValue()));
         loginBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         loginBtn.setWidthFull();
 
         passwordField.addKeyDownListener(com.vaadin.flow.component.Key.ENTER,
                 ev -> handleLogin(usernameField.getValue(), passwordField.getValue()));
 
-        card.add(title, errorMsg, usernameField, passwordField, loginBtn);
+        card.add(langRow, title, errorMsg, usernameField, passwordField, loginBtn);
         add(card);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.login");
     }
 
     private void handleLogin(String username, String password) {
         errorMsg.setVisible(false);
         if (username.isBlank() || password.isBlank()) {
-            showError("Username and password are required.");
+            showError(i18n.translate("auth.usernamePasswordRequired"));
             return;
         }
 
@@ -108,10 +130,10 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver {
             auth = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username.trim(), password));
         } catch (BadCredentialsException e) {
-            showError("Incorrect username or password.");
+            showError(i18n.translate("auth.incorrectCredentials"));
             return;
         } catch (Exception e) {
-            showError("Login failed. Please try again.");
+            showError(i18n.translate("auth.loginFailed"));
             return;
         }
 
@@ -119,7 +141,7 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver {
         String email = userService.findEmailByUsername(userDetails.getUsername()).orElse(null);
 
         if (email == null) {
-            showError("Your account has no email address configured. Contact an administrator.");
+            showError(i18n.translate("auth.noEmail"));
             return;
         }
 
@@ -132,7 +154,7 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver {
 
         // No trusted device — send OTP and proceed to verification
         String otp = otpService.generateAndStore(email);
-        emailService.sendOtp(email, otp);
+        emailService.sendOtp(email, otp, localeService.getCurrentLocale());
 
         VaadinSession.getCurrent().setAttribute("2fa_username", userDetails.getUsername());
         VaadinSession.getCurrent().setAttribute("2fa_email", email);

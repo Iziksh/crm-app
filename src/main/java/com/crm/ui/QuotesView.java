@@ -14,6 +14,7 @@ import com.crm.service.ContactService;
 import com.crm.service.OpportunityService;
 import com.crm.service.ProductService;
 import com.crm.service.QuoteService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -33,9 +34,9 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.NumberField;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.router.PageTitle;
-import com.vaadin.flow.router.Route;
 import com.vaadin.flow.data.provider.DataProvider;
+import com.vaadin.flow.router.HasDynamicTitle;
+import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -43,10 +44,10 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Route(value = "quotes", layout = MainLayout.class)
-@PageTitle("Quotes | CRM")
 @RolesAllowed({"SALES", "ADMIN"})
-public class QuotesView extends VerticalLayout {
+public class QuotesView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final QuoteService quoteService;
     private final AccountService accountService;
     private final ContactService contactService;
@@ -55,7 +56,7 @@ public class QuotesView extends VerticalLayout {
 
     private final Grid<QuoteResponse> grid = new Grid<>(QuoteResponse.class, false);
     private final Grid<QuoteLineItemResponse> lineItemGrid = new Grid<>(QuoteLineItemResponse.class, false);
-    private final ComboBox<QuoteStatus> statusFilter = new ComboBox<>("Status");
+    private final ComboBox<QuoteStatus> statusFilter = new ComboBox<>();
     private final VerticalLayout detailPanel = new VerticalLayout();
 
     private QuoteResponse selectedQuote = null;
@@ -64,19 +65,21 @@ public class QuotesView extends VerticalLayout {
                       AccountService accountService,
                       ContactService contactService,
                       OpportunityService opportunityService,
-                      ProductService productService) {
+                      ProductService productService,
+                      TranslationService i18n) {
         this.quoteService = quoteService;
         this.accountService = accountService;
         this.contactService = contactService;
         this.opportunityService = opportunityService;
         this.productService = productService;
+        this.i18n = i18n;
         setSizeFull();
         setPadding(true);
 
         configureGrid();
         configureDetailPanel();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Quotes"), toolbar, grid, detailPanel);
+        add(new H2(i18n.translate("view.quotes.title")), toolbar, grid, detailPanel);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -89,15 +92,20 @@ public class QuotesView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.quotes");
+    }
+
     private void configureGrid() {
         grid.setHeight("400px");
-        grid.addColumn(QuoteResponse::quoteNumber).setHeader("Quote #").setFlexGrow(0).setWidth("130px");
-        grid.addColumn(QuoteResponse::title).setHeader("Title").setSortable(true).setFlexGrow(2);
-        grid.addColumn(QuoteResponse::accountName).setHeader("Account").setSortable(true);
-        grid.addComponentColumn(q -> statusBadge(q.status())).setHeader("Status").setFlexGrow(0).setWidth("110px");
+        grid.addColumn(QuoteResponse::quoteNumber).setHeader(i18n.translate("view.quotes.column.quoteNumber")).setFlexGrow(0).setWidth("130px");
+        grid.addColumn(QuoteResponse::title).setHeader(i18n.translate("common.title")).setSortable(true).setFlexGrow(2);
+        grid.addColumn(QuoteResponse::accountName).setHeader(i18n.translate("common.account")).setSortable(true);
+        grid.addComponentColumn(q -> statusBadge(q.status())).setHeader(i18n.translate("common.status")).setFlexGrow(0).setWidth("110px");
         grid.addColumn(q -> q.totalAmount() != null ? q.currency() + " " + q.totalAmount() : "")
-                .setHeader("Total").setSortable(true);
-        grid.addColumn(q -> q.validUntil() != null ? q.validUntil().toString() : "").setHeader("Valid Until");
+                .setHeader(i18n.translate("common.total")).setSortable(true);
+        grid.addColumn(q -> q.validUntil() != null ? q.validUntil().toString() : "").setHeader(i18n.translate("view.quotes.validUntil"));
         grid.addComponentColumn(quote -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
@@ -105,7 +113,7 @@ public class QuotesView extends VerticalLayout {
             if (quote.status() == QuoteStatus.WON) {
                 Button convert = new Button(VaadinIcon.CART.create(), e -> convertToOrder(quote));
                 convert.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SUCCESS);
-                convert.getElement().setAttribute("title", "Convert to Sales Order");
+                convert.getElement().setAttribute("title", i18n.translate("view.quotes.convertToSalesOrder"));
                 actions.add(convert);
             }
 
@@ -117,7 +125,7 @@ public class QuotesView extends VerticalLayout {
 
             actions.add(edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("160px");
+        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("160px");
 
         grid.asSingleSelect().addValueChangeListener(e -> {
             selectedQuote = e.getValue();
@@ -129,11 +137,11 @@ public class QuotesView extends VerticalLayout {
         detailPanel.setPadding(false);
         detailPanel.setVisible(false);
 
-        lineItemGrid.addColumn(QuoteLineItemResponse::productName).setHeader("Product").setFlexGrow(2);
-        lineItemGrid.addColumn(QuoteLineItemResponse::quantity).setHeader("Qty");
-        lineItemGrid.addColumn(QuoteLineItemResponse::unitPrice).setHeader("Unit Price");
-        lineItemGrid.addColumn(i -> i.discountPct() + "%").setHeader("Discount");
-        lineItemGrid.addColumn(QuoteLineItemResponse::lineTotal).setHeader("Total");
+        lineItemGrid.addColumn(QuoteLineItemResponse::productName).setHeader(i18n.translate("common.product")).setFlexGrow(2);
+        lineItemGrid.addColumn(QuoteLineItemResponse::quantity).setHeader(i18n.translate("common.qty"));
+        lineItemGrid.addColumn(QuoteLineItemResponse::unitPrice).setHeader(i18n.translate("common.unitPrice"));
+        lineItemGrid.addColumn(i -> i.discountPct() + "%").setHeader(i18n.translate("common.discount"));
+        lineItemGrid.addColumn(QuoteLineItemResponse::lineTotal).setHeader(i18n.translate("common.total"));
         lineItemGrid.addComponentColumn(item -> {
             Button del = new Button(VaadinIcon.TRASH.create(), e -> {
                 if (selectedQuote != null) {
@@ -157,10 +165,10 @@ public class QuotesView extends VerticalLayout {
         }
         detailPanel.setVisible(true);
 
-        Button addItem = new Button("Add Line Item", VaadinIcon.PLUS.create(), e -> openLineItemDialog());
+        Button addItem = new Button(i18n.translate("common.addLineItem"), VaadinIcon.PLUS.create(), e -> openLineItemDialog());
         addItem.addThemeVariants(ButtonVariant.LUMO_SMALL);
 
-        HorizontalLayout header = new HorizontalLayout(new H4("Line Items"), addItem);
+        HorizontalLayout header = new HorizontalLayout(new H4(i18n.translate("common.lineItems")), addItem);
         header.setDefaultVerticalComponentAlignment(Alignment.CENTER);
 
         QuoteResponse fresh = quoteService.findById(selectedQuote.id());
@@ -171,21 +179,21 @@ public class QuotesView extends VerticalLayout {
     private void openLineItemDialog() {
         if (selectedQuote == null) return;
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle("Add Line Item");
+        dialog.setHeaderTitle(i18n.translate("common.addLineItem"));
         dialog.setWidth("440px");
 
-        ComboBox<ProductResponse> productCombo = new ComboBox<>("Product");
+        ComboBox<ProductResponse> productCombo = new ComboBox<>(i18n.translate("common.product"));
         productCombo.setItems(productService.findAll(PageRequest.of(0, 500), null).getContent());
         productCombo.setItemLabelGenerator(p -> p.sku() + " — " + p.name());
         productCombo.setClearButtonVisible(true);
         productCombo.setWidthFull();
 
-        TextField productName = new TextField("Product Name");
-        productName.setPlaceholder("Or type manually");
+        TextField productName = new TextField(i18n.translate("common.productName"));
+        productName.setPlaceholder(i18n.translate("common.orTypeManually"));
 
-        NumberField qty = new NumberField("Quantity");
-        NumberField unitPrice = new NumberField("Unit Price");
-        NumberField discount = new NumberField("Discount %");
+        NumberField qty = new NumberField(i18n.translate("common.quantity"));
+        NumberField unitPrice = new NumberField(i18n.translate("common.unitPrice"));
+        NumberField discount = new NumberField(i18n.translate("common.discountPercent"));
         discount.setValue(0.0);
 
         productCombo.addValueChangeListener(e -> {
@@ -202,7 +210,7 @@ public class QuotesView extends VerticalLayout {
         form.setColspan(productName, 2);
         dialog.add(form);
 
-        Button save = new Button("Add", e -> {
+        Button save = new Button(i18n.translate("common.add"), e -> {
             String name = productName.getValue().isBlank()
                     ? (productCombo.getValue() != null ? productCombo.getValue().name() : "")
                     : productName.getValue();
@@ -218,24 +226,26 @@ public class QuotesView extends VerticalLayout {
                 refreshDetailPanel();
                 refreshGrid();
                 dialog.close();
-                notify("Line item added", false);
+                notify(i18n.translate("view.quotes.notification.lineItemAdded"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
     private HorizontalLayout buildToolbar() {
+        statusFilter.setLabel(i18n.translate("common.status"));
         statusFilter.setItems(QuoteStatus.values());
-        statusFilter.setPlaceholder("All Statuses");
+        statusFilter.setItemLabelGenerator(i18n::translateEnum);
+        statusFilter.setPlaceholder(i18n.translate("common.allStatuses"));
         statusFilter.setClearButtonVisible(true);
         statusFilter.setWidth("150px");
         statusFilter.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("New Quote", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.quotes.newQuote"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
         HorizontalLayout toolbar = new HorizontalLayout(statusFilter, addBtn);
@@ -251,7 +261,7 @@ public class QuotesView extends VerticalLayout {
         try {
             quoteService.convertToOrder(quote.id());
             refreshGrid();
-            notify("Quote converted to Sales Order", false);
+            notify(i18n.translate("view.quotes.notification.converted"), false);
         } catch (Exception e) {
             notify(e.getMessage(), true);
         }
@@ -259,38 +269,41 @@ public class QuotesView extends VerticalLayout {
 
     private void openDialog(QuoteResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Quote" : "Edit Quote");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.quotes.newQuote")
+                : i18n.translate("view.quotes.editQuote"));
         dialog.setWidth("600px");
 
-        TextField title = new TextField("Title");
+        TextField title = new TextField(i18n.translate("common.title"));
 
-        ComboBox<QuoteStatus> status = new ComboBox<>("Status");
+        ComboBox<QuoteStatus> status = new ComboBox<>(i18n.translate("common.status"));
         status.setItems(QuoteStatus.values());
+        status.setItemLabelGenerator(i18n::translateEnum);
         status.setValue(QuoteStatus.DRAFT);
 
-        DatePicker validUntil = new DatePicker("Valid Until");
-        TextField currency = new TextField("Currency");
+        DatePicker validUntil = new DatePicker(i18n.translate("view.quotes.validUntil"));
+        TextField currency = new TextField(i18n.translate("common.currency"));
         currency.setValue("USD");
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> account = new ComboBox<>("Account");
+        ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
         account.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contact = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contact = new ComboBox<>(i18n.translate("common.contact"));
         contact.setItems(contacts);
         contact.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contact.setClearButtonVisible(true);
 
         List<OpportunityResponse> opps = opportunityService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<OpportunityResponse> opportunity = new ComboBox<>("Opportunity");
+        ComboBox<OpportunityResponse> opportunity = new ComboBox<>(i18n.translate("common.opportunity"));
         opportunity.setItems(opps);
         opportunity.setItemLabelGenerator(OpportunityResponse::name);
         opportunity.setClearButtonVisible(true);
 
-        TextArea notes = new TextArea("Notes");
+        TextArea notes = new TextArea(i18n.translate("common.notes"));
         notes.setMinHeight("80px");
 
         if (existing != null) {
@@ -312,7 +325,7 @@ public class QuotesView extends VerticalLayout {
         form.setColspan(notes, 2);
         dialog.add(form);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("common.save"), e -> {
             if (title.getValue().isBlank()) { title.setInvalid(true); return; }
             QuoteRequest req = new QuoteRequest(
                     title.getValue(), status.getValue(), validUntil.getValue(), currency.getValue(),
@@ -326,21 +339,21 @@ public class QuotesView extends VerticalLayout {
                 else quoteService.update(existing.id(), req);
                 refreshGrid();
                 dialog.close();
-                notify("Quote saved", false);
+                notify(i18n.translate("view.quotes.notification.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
     private void confirmDelete(QuoteResponse quote) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Quote");
-        confirm.setText("Delete \"" + quote.title() + "\"?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.quotes.deleteQuote"));
+        confirm.setText(i18n.translate("dialog.deleteConfirm", quote.title()));
+        confirm.setConfirmText(i18n.translate("common.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
@@ -348,14 +361,14 @@ public class QuotesView extends VerticalLayout {
             selectedQuote = null;
             refreshGrid();
             refreshDetailPanel();
-            notify("Quote deleted", false);
+            notify(i18n.translate("view.quotes.notification.deleted"), false);
         });
         confirm.open();
     }
 
     private Span statusBadge(QuoteStatus status) {
         if (status == null) return new Span();
-        Span badge = new Span(status.name());
+        Span badge = new Span(i18n.translateEnum(status));
         String theme = switch (status) {
             case DRAFT -> "badge contrast";
             case SENT -> "badge primary";
@@ -367,7 +380,7 @@ public class QuotesView extends VerticalLayout {
         return badge;
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

@@ -10,6 +10,7 @@ import com.crm.service.AccountService;
 import com.crm.service.ContactService;
 import com.crm.service.ContractService;
 import com.crm.service.SalesOrderService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -28,9 +29,9 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.NumberField;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.router.PageTitle;
-import com.vaadin.flow.router.Route;
 import com.vaadin.flow.data.provider.DataProvider;
+import com.vaadin.flow.router.HasDynamicTitle;
+import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -38,32 +39,34 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Route(value = "contracts", layout = MainLayout.class)
-@PageTitle("Contracts | CRM")
 @RolesAllowed({"SALES", "ADMIN"})
-public class ContractsView extends VerticalLayout {
+public class ContractsView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final ContractService contractService;
     private final AccountService accountService;
     private final ContactService contactService;
     private final SalesOrderService salesOrderService;
 
     private final Grid<ContractResponse> grid = new Grid<>(ContractResponse.class, false);
-    private final ComboBox<ContractStatus> statusFilter = new ComboBox<>("Status");
+    private final ComboBox<ContractStatus> statusFilter = new ComboBox<>();
 
     public ContractsView(ContractService contractService,
                          AccountService accountService,
                          ContactService contactService,
-                         SalesOrderService salesOrderService) {
+                         SalesOrderService salesOrderService,
+                         TranslationService i18n) {
         this.contractService = contractService;
         this.accountService = accountService;
         this.contactService = contactService;
         this.salesOrderService = salesOrderService;
+        this.i18n = i18n;
         setSizeFull();
         setPadding(true);
 
         configureGrid();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Contracts"), toolbar, grid);
+        add(new H2(i18n.translate("view.contracts.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -76,15 +79,20 @@ public class ContractsView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.contracts");
+    }
+
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(ContractResponse::contractNumber).setHeader("Contract #").setFlexGrow(0).setWidth("140px");
-        grid.addColumn(ContractResponse::title).setHeader("Title").setSortable(true).setFlexGrow(2);
-        grid.addColumn(ContractResponse::accountName).setHeader("Account").setSortable(true);
-        grid.addComponentColumn(c -> statusBadge(c.status())).setHeader("Status").setFlexGrow(0).setWidth("110px");
-        grid.addColumn(c -> c.totalValue() != null ? c.currency() + " " + c.totalValue() : "").setHeader("Value");
-        grid.addColumn(c -> c.startDate() != null ? c.startDate().toString() : "").setHeader("Start Date");
-        grid.addColumn(c -> c.endDate() != null ? c.endDate().toString() : "").setHeader("End Date");
+        grid.addColumn(ContractResponse::contractNumber).setHeader(i18n.translate("view.contracts.column.contractNumber")).setFlexGrow(0).setWidth("140px");
+        grid.addColumn(ContractResponse::title).setHeader(i18n.translate("common.title")).setSortable(true).setFlexGrow(2);
+        grid.addColumn(ContractResponse::accountName).setHeader(i18n.translate("common.account")).setSortable(true);
+        grid.addComponentColumn(c -> statusBadge(c.status())).setHeader(i18n.translate("common.status")).setFlexGrow(0).setWidth("110px");
+        grid.addColumn(c -> c.totalValue() != null ? c.currency() + " " + c.totalValue() : "").setHeader(i18n.translate("common.value"));
+        grid.addColumn(c -> c.startDate() != null ? c.startDate().toString() : "").setHeader(i18n.translate("common.startDate"));
+        grid.addColumn(c -> c.endDate() != null ? c.endDate().toString() : "").setHeader(i18n.translate("common.endDate"));
         grid.addComponentColumn(contract -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
@@ -97,17 +105,19 @@ public class ContractsView extends VerticalLayout {
 
             actions.add(edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("110px");
+        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("110px");
     }
 
     private HorizontalLayout buildToolbar() {
+        statusFilter.setLabel(i18n.translate("common.status"));
         statusFilter.setItems(ContractStatus.values());
-        statusFilter.setPlaceholder("All Statuses");
+        statusFilter.setItemLabelGenerator(i18n::translateEnum);
+        statusFilter.setPlaceholder(i18n.translate("common.allStatuses"));
         statusFilter.setClearButtonVisible(true);
         statusFilter.setWidth("150px");
         statusFilter.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("New Contract", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.contracts.newContract"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
         HorizontalLayout toolbar = new HorizontalLayout(statusFilter, addBtn);
@@ -121,43 +131,46 @@ public class ContractsView extends VerticalLayout {
 
     private void openDialog(ContractResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Contract" : "Edit Contract");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.contracts.newContract")
+                : i18n.translate("view.contracts.editContract"));
         dialog.setWidth("640px");
 
-        TextField title = new TextField("Title");
+        TextField title = new TextField(i18n.translate("common.title"));
 
-        ComboBox<ContractStatus> status = new ComboBox<>("Status");
+        ComboBox<ContractStatus> status = new ComboBox<>(i18n.translate("common.status"));
         status.setItems(ContractStatus.values());
+        status.setItemLabelGenerator(i18n::translateEnum);
         status.setValue(ContractStatus.DRAFT);
 
-        DatePicker startDate = new DatePicker("Start Date");
-        DatePicker endDate = new DatePicker("End Date");
+        DatePicker startDate = new DatePicker(i18n.translate("common.startDate"));
+        DatePicker endDate = new DatePicker(i18n.translate("common.endDate"));
 
-        NumberField totalValue = new NumberField("Total Value");
-        TextField currency = new TextField("Currency");
+        NumberField totalValue = new NumberField(i18n.translate("view.contracts.totalValue"));
+        TextField currency = new TextField(i18n.translate("common.currency"));
         currency.setValue("USD");
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> account = new ComboBox<>("Account");
+        ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
         account.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contact = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contact = new ComboBox<>(i18n.translate("common.contact"));
         contact.setItems(contacts);
         contact.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contact.setClearButtonVisible(true);
 
         List<SalesOrderResponse> orders = salesOrderService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<SalesOrderResponse> salesOrder = new ComboBox<>("Sales Order (optional)");
+        ComboBox<SalesOrderResponse> salesOrder = new ComboBox<>(i18n.translate("view.contracts.salesOrderOptional"));
         salesOrder.setItems(orders);
         salesOrder.setItemLabelGenerator(SalesOrderResponse::orderNumber);
         salesOrder.setClearButtonVisible(true);
 
-        TextArea description = new TextArea("Description");
+        TextArea description = new TextArea(i18n.translate("common.description"));
         description.setMinHeight("70px");
-        TextArea terms = new TextArea("Terms");
+        TextArea terms = new TextArea(i18n.translate("common.terms"));
         terms.setMinHeight("70px");
 
         if (existing != null) {
@@ -183,7 +196,7 @@ public class ContractsView extends VerticalLayout {
         form.setColspan(terms, 2);
         dialog.add(form);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("common.save"), e -> {
             if (title.getValue().isBlank()) { title.setInvalid(true); return; }
             BigDecimal val = totalValue.getValue() != null ? BigDecimal.valueOf(totalValue.getValue()) : null;
             ContractRequest req = new ContractRequest(
@@ -198,34 +211,34 @@ public class ContractsView extends VerticalLayout {
                 else contractService.update(existing.id(), req);
                 refreshGrid();
                 dialog.close();
-                notify("Contract saved", false);
+                notify(i18n.translate("view.contracts.notification.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
     private void confirmDelete(ContractResponse contract) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Contract");
-        confirm.setText("Delete \"" + contract.title() + "\"?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.contracts.deleteContract"));
+        confirm.setText(i18n.translate("dialog.deleteConfirm", contract.title()));
+        confirm.setConfirmText(i18n.translate("common.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             contractService.delete(contract.id());
             refreshGrid();
-            notify("Contract deleted", false);
+            notify(i18n.translate("view.contracts.notification.deleted"), false);
         });
         confirm.open();
     }
 
     private Span statusBadge(ContractStatus status) {
         if (status == null) return new Span();
-        Span badge = new Span(status.name());
+        Span badge = new Span(i18n.translateEnum(status));
         String theme = switch (status) {
             case DRAFT -> "badge contrast";
             case ACTIVE -> "badge success";
@@ -236,7 +249,7 @@ public class ContractsView extends VerticalLayout {
         return badge;
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

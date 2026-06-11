@@ -1,6 +1,7 @@
 package com.crm.ui;
 
 import com.crm.repository.UserRepository;
+import com.crm.service.TranslationService;
 import com.crm.timetracking.entity.Attendance;
 import com.crm.timetracking.service.AttendanceService;
 import com.vaadin.flow.component.button.Button;
@@ -16,7 +17,7 @@ import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextArea;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 
@@ -25,13 +26,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Route(value = "attendance-corrections", layout = MainLayout.class)
-@PageTitle("Attendance Corrections | CRM")
 @RolesAllowed("ADMIN")
-public class AttendanceCorrectionView extends VerticalLayout {
+public class AttendanceCorrectionView extends VerticalLayout implements HasDynamicTitle {
 
-    private static final ZoneId              IL_ZONE  = ZoneId.of("Asia/Jerusalem");
-    private static final DateTimeFormatter   DT_FMT   = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final ZoneId            IL_ZONE = ZoneId.of("Asia/Jerusalem");
+    private static final DateTimeFormatter DT_FMT  = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
+    private final TranslationService i18n;
     private final AttendanceService attendanceService;
     private final UserRepository    userRepository;
     private final Long              currentManagerId;
@@ -40,9 +41,11 @@ public class AttendanceCorrectionView extends VerticalLayout {
 
     public AttendanceCorrectionView(AttendanceService attendanceService,
                                     UserRepository userRepository,
-                                    SecurityService securityService) {
+                                    SecurityService securityService,
+                                    TranslationService i18n) {
         this.attendanceService = attendanceService;
         this.userRepository    = userRepository;
+        this.i18n = i18n;
 
         String username = securityService.getUsername();
         this.currentManagerId = userRepository.findByUsername(username)
@@ -51,51 +54,61 @@ public class AttendanceCorrectionView extends VerticalLayout {
         setSpacing(true);
         setPadding(true);
 
-        add(new H2("Attendance Corrections — Pending Approvals"));
-        add(new Paragraph(
-            "Review manually-submitted attendance corrections from employees who forgot " +
-            "to clock in or out. Approve to count the session toward their monthly hours; " +
-            "reject to dismiss it."));
+        add(new H2(i18n.translate("view.attendanceCorrection.title")));
+        add(new Paragraph(i18n.translate("view.attendanceCorrection.description")));
 
         buildGrid();
         refresh();
+    }
+
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.attendanceCorrections");
     }
 
     private void buildGrid() {
         grid = new Grid<>(Attendance.class, false);
 
         grid.addColumn(a -> resolveUsername(a.getUserId()))
-                .setHeader("Employee").setWidth("160px").setFlexGrow(0);
+                .setHeader(i18n.translate("view.attendanceCorrection.column.employee"))
+                .setWidth("160px").setFlexGrow(0);
 
         grid.addColumn(a -> a.getStartTime().atZoneSameInstant(IL_ZONE).format(DT_FMT))
-                .setHeader("Entry").setWidth("155px").setFlexGrow(0);
+                .setHeader(i18n.translate("view.attendanceCorrection.column.entry"))
+                .setWidth("155px").setFlexGrow(0);
 
         grid.addColumn(a -> a.getEndTime() != null
-                        ? a.getEndTime().atZoneSameInstant(IL_ZONE).format(DT_FMT) : "—")
-                .setHeader("Exit").setWidth("155px").setFlexGrow(0);
+                        ? a.getEndTime().atZoneSameInstant(IL_ZONE).format(DT_FMT)
+                        : i18n.translate("common.emDash"))
+                .setHeader(i18n.translate("view.attendanceCorrection.column.exit"))
+                .setWidth("155px").setFlexGrow(0);
 
         grid.addColumn(a -> {
-            if (a.getDurationSeconds() == null) return "—";
+            if (a.getDurationSeconds() == null) return i18n.translate("common.emDash");
             long h = a.getDurationSeconds() / 3600;
             long m = (a.getDurationSeconds() % 3600) / 60;
-            return String.format("%dh %02dm", h, m);
-        }).setHeader("Duration").setWidth("100px").setFlexGrow(0);
+            return i18n.translate("common.duration.hoursMinutes", h, String.format("%02d", m));
+        }).setHeader(i18n.translate("view.attendanceCorrection.column.duration"))
+                .setWidth("100px").setFlexGrow(0);
 
         grid.addColumn(a -> a.getNote() != null ? a.getNote() : "")
-                .setHeader("Reason").setFlexGrow(1);
+                .setHeader(i18n.translate("view.attendanceCorrection.column.reason")).setFlexGrow(1);
 
         grid.addComponentColumn(a -> {
-            Button approveBtn = new Button("Approve", e -> doApprove(a));
+            Button approveBtn = new Button(i18n.translate("view.attendanceCorrection.approve"),
+                    e -> doApprove(a));
             approveBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS, ButtonVariant.LUMO_SMALL);
 
-            Button rejectBtn = new Button("Reject", e -> openRejectDialog(a));
+            Button rejectBtn = new Button(i18n.translate("view.attendanceCorrection.reject"),
+                    e -> openRejectDialog(a));
             rejectBtn.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL,
                                        ButtonVariant.LUMO_TERTIARY);
 
             HorizontalLayout actions = new HorizontalLayout(approveBtn, rejectBtn);
             actions.setSpacing(true);
             return actions;
-        }).setHeader("Actions").setWidth("200px").setFlexGrow(0);
+        }).setHeader(i18n.translate("view.attendanceCorrection.column.actions"))
+                .setWidth("200px").setFlexGrow(0);
 
         grid.setWidthFull();
         grid.setHeight("400px");
@@ -107,24 +120,23 @@ public class AttendanceCorrectionView extends VerticalLayout {
         grid.setItems(pending);
 
         if (pending.isEmpty()) {
-            Span empty = new Span("No pending corrections.");
+            Span empty = new Span(i18n.translate("view.attendanceCorrection.noPending"));
             empty.getStyle().set("color", "#888").set("font-style", "italic");
-            // Show inline only when first loaded empty — grid handles empty state visually
         }
     }
 
-    // ── APPROVE ───────────────────────────────────────────────────────────────
-
     private void doApprove(Attendance a) {
         ConfirmDialog confirm = new ConfirmDialog(
-            "Approve correction",
-            "Approve the correction for " + resolveUsername(a.getUserId()) + " on "
-                + a.getStartTime().atZoneSameInstant(IL_ZONE).format(DT_FMT) + "?",
-            "Approve", ev -> {
+            i18n.translate("dialog.attendanceCorrection.approve.title"),
+            i18n.translate("dialog.attendanceCorrection.approve.message",
+                resolveUsername(a.getUserId()),
+                a.getStartTime().atZoneSameInstant(IL_ZONE).format(DT_FMT)),
+            i18n.translate("view.attendanceCorrection.approve"), ev -> {
                 try {
                     attendanceService.approve(a.getId(), currentManagerId);
                     refresh();
-                    Notification n = Notification.show("Correction approved.",
+                    Notification n = Notification.show(
+                            i18n.translate("notification.attendanceCorrection.approved"),
                             3000, Notification.Position.BOTTOM_CENTER);
                     n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
                 } catch (Exception ex) {
@@ -132,27 +144,26 @@ public class AttendanceCorrectionView extends VerticalLayout {
                             .addThemeVariants(NotificationVariant.LUMO_ERROR);
                 }
             },
-            "Cancel", ev -> {}
+            i18n.translate("common.cancel"), ev -> {}
         );
         confirm.setConfirmButtonTheme("success primary");
         confirm.open();
     }
 
-    // ── REJECT ────────────────────────────────────────────────────────────────
-
     private void openRejectDialog(Attendance a) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle("Reject correction — " + resolveUsername(a.getUserId()));
+        dialog.setHeaderTitle(i18n.translate("dialog.attendanceCorrection.reject.title",
+                resolveUsername(a.getUserId())));
         dialog.setWidth("400px");
 
-        TextArea reasonArea = new TextArea("Reason for rejection");
-        reasonArea.setPlaceholder("e.g. Times not matching building access logs");
+        TextArea reasonArea = new TextArea(i18n.translate("view.attendanceCorrection.rejectReason.label"));
+        reasonArea.setPlaceholder(i18n.translate("view.attendanceCorrection.rejectReason.placeholder"));
         reasonArea.setWidthFull();
         reasonArea.setRequired(true);
 
-        Button confirmBtn = new Button("Reject", ev -> {
+        Button confirmBtn = new Button(i18n.translate("view.attendanceCorrection.reject"), ev -> {
             if (reasonArea.getValue().isBlank()) {
-                reasonArea.setErrorMessage("A reason is required.");
+                reasonArea.setErrorMessage(i18n.translate("validation.rejectReasonRequired"));
                 reasonArea.setInvalid(true);
                 return;
             }
@@ -160,7 +171,8 @@ public class AttendanceCorrectionView extends VerticalLayout {
                 attendanceService.reject(a.getId(), currentManagerId, reasonArea.getValue());
                 dialog.close();
                 refresh();
-                Notification n = Notification.show("Correction rejected.",
+                Notification n = Notification.show(
+                        i18n.translate("notification.attendanceCorrection.rejected"),
                         3000, Notification.Position.BOTTOM_CENTER);
                 n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
             } catch (Exception ex) {
@@ -170,7 +182,7 @@ public class AttendanceCorrectionView extends VerticalLayout {
         });
         confirmBtn.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_PRIMARY);
 
-        Button cancelBtn = new Button("Cancel", ev -> dialog.close());
+        Button cancelBtn = new Button(i18n.translate("common.cancel"), ev -> dialog.close());
         cancelBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
         dialog.add(new VerticalLayout(reasonArea) {{ setPadding(false); }});
@@ -180,6 +192,7 @@ public class AttendanceCorrectionView extends VerticalLayout {
 
     private String resolveUsername(Long userId) {
         return userRepository.findById(userId)
-                .map(u -> u.getUsername()).orElse("user-" + userId);
+                .map(u -> u.getUsername())
+                .orElse(i18n.translate("view.attendanceCorrection.unknownUser", userId));
     }
 }
