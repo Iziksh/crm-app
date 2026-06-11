@@ -1,6 +1,7 @@
 package com.crm.ui;
 
 import com.crm.repository.UserRepository;
+import com.crm.service.TranslationService;
 import com.crm.timetracking.dto.AttendanceReportRequest;
 import com.crm.timetracking.dto.AttendanceReportResponse;
 import com.crm.timetracking.entity.Attendance;
@@ -27,7 +28,7 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.timepicker.TimePicker;
 import com.vaadin.flow.data.binder.Binder;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.PermitAll;
 
@@ -39,24 +40,20 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 @Route(value = "time-clock", layout = MainLayout.class)
-@PageTitle("שעון נוכחות | CRM")
 @PermitAll
-public class TimeClockView extends VerticalLayout {
+public class TimeClockView extends VerticalLayout implements HasDynamicTitle {
 
-    private static final ZoneId IL_ZONE   = ZoneId.of("Asia/Jerusalem");
-    private static final DateTimeFormatter TIME_FMT      = DateTimeFormatter.ofPattern("HH:mm");
-    private static final DateTimeFormatter DATE_DISPLAY  = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy",
-                                                                   Locale.forLanguageTag("he"));
+    private static final ZoneId IL_ZONE  = ZoneId.of("Asia/Jerusalem");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
 
+    private final TranslationService      i18n;
     private final AttendanceService       attendanceService;
     private final AttendanceReportService reportService;
     private final HolidayRepository       holidayRepository;
     private final Long                    currentUserId;
 
-    // Status card
     private Div    statusDot;
     private Span   statusText;
     private Span   sinceLabel;
@@ -64,7 +61,6 @@ public class TimeClockView extends VerticalLayout {
     private Button clockOutBtn;
     private TextField clockNoteField;
 
-    // Today's sessions grid
     private Grid<Attendance>             sessionsGrid;
     private GridListDataView<Attendance> sessionsDataView;
     private Attendance                   pendingNewRow;
@@ -72,7 +68,6 @@ public class TimeClockView extends VerticalLayout {
     private TimePicker                   editorStartPicker;
     private TimePicker                   editorEndPicker;
 
-    // Leave reports
     private Grid<AttendanceReportResponse> reportsGrid;
     private VerticalLayout                 addReportPanel;
     private ComboBox<AttendanceReportType> reportTypeSelect;
@@ -82,17 +77,18 @@ public class TimeClockView extends VerticalLayout {
     private HorizontalLayout               reportTimesRow;
     private TextField                      reportNoteField;
 
-    // Holidays
     private VerticalLayout holidayList;
 
     public TimeClockView(AttendanceService attendanceService,
                          AttendanceReportService reportService,
                          UserRepository userRepository,
                          HolidayRepository holidayRepository,
-                         SecurityService securityService) {
+                         SecurityService securityService,
+                         TranslationService i18n) {
         this.attendanceService = attendanceService;
         this.reportService     = reportService;
         this.holidayRepository = holidayRepository;
+        this.i18n = i18n;
 
         this.currentUserId = userRepository.findByUsername(securityService.getUsername())
                 .map(u -> u.getId()).orElse(null);
@@ -106,7 +102,7 @@ public class TimeClockView extends VerticalLayout {
 
         if (currentUserId == null) {
             Div err = card();
-            err.add(new Span("Unable to resolve current user."));
+            err.add(new Span(i18n.translate("view.timeClock.error.userNotResolved")));
             add(err);
             return;
         }
@@ -118,34 +114,30 @@ public class TimeClockView extends VerticalLayout {
         refreshAll();
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  PAGE HEADER
-    // ══════════════════════════════════════════════════════════════════════════
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.timeClock");
+    }
 
     private void buildPageHeader() {
         LocalDate today = LocalDate.now(IL_ZONE);
-        Span title = new Span("שעון נוכחות");
+        Span title = new Span(i18n.translate("view.timeClock.title"));
         title.getStyle().set("font-size", "20px").set("font-weight", "700").set("color", "#1a1a2e");
 
-        Span dateLabel = new Span(today.format(DATE_DISPLAY));
+        Span dateLabel = new Span(today.format(
+                DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", i18n.getCurrentLocale())));
         dateLabel.getStyle().set("font-size", "13px").set("color", "#888").set("margin-top", "2px");
 
         Div header = new Div(title, dateLabel);
         header.getStyle()
                 .set("display", "flex").set("flex-direction", "column")
-                .set("padding", "20px 20px 12px").set("direction", "rtl");
+                .set("padding", "20px 20px 12px");
         add(header);
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  STATUS CARD
-    // ══════════════════════════════════════════════════════════════════════════
-
     private void buildStatusCard() {
         Div card = card();
-        card.getStyle().set("direction", "rtl");
 
-        // Status row
         statusDot = new Div();
         statusDot.getStyle()
                 .set("width", "10px").set("height", "10px").set("border-radius", "50%")
@@ -166,19 +158,17 @@ public class TimeClockView extends VerticalLayout {
                 .set("background", "#f8f9fa").set("border-radius", "10px")
                 .set("padding", "12px 16px").set("margin-bottom", "16px");
 
-        // Note field
         clockNoteField = new TextField();
-        clockNoteField.setPlaceholder("הערה (משימה / פרויקט)…");
+        clockNoteField.setPlaceholder(i18n.translate("view.timeClock.note.placeholder"));
         clockNoteField.setWidthFull();
         clockNoteField.getStyle().set("margin-bottom", "12px");
 
-        // Clock In / Out buttons
-        clockInBtn = new Button("כניסה", VaadinIcon.SIGN_IN.create());
+        clockInBtn = new Button(i18n.translate("view.timeClock.clockIn"), VaadinIcon.SIGN_IN.create());
         clockInBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
                 ButtonVariant.LUMO_LARGE);
         clockInBtn.addClickListener(e -> doPunchIn());
 
-        clockOutBtn = new Button("יציאה", VaadinIcon.SIGN_OUT.create());
+        clockOutBtn = new Button(i18n.translate("view.timeClock.clockOut"), VaadinIcon.SIGN_OUT.create());
         clockOutBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR,
                 ButtonVariant.LUMO_LARGE);
         clockOutBtn.addClickListener(e -> doPunchOut());
@@ -193,29 +183,21 @@ public class TimeClockView extends VerticalLayout {
         add(card);
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  TODAY'S SESSIONS CARD
-    // ══════════════════════════════════════════════════════════════════════════
-
     private void buildTodaySessionsCard() {
         Div card = card();
-        card.getStyle().set("direction", "rtl");
 
-        // Header
-        Span title = sectionLabel("פעילויות היום");
-        Button addEntry = new Button("+ כניסה חסרה", e -> addNewSessionRow());
+        Span title = sectionLabel(i18n.translate("view.timeClock.section.todayActivities"));
+        Button addEntry = new Button(i18n.translate("view.timeClock.addMissingEntry"), e -> addNewSessionRow());
         addEntry.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
         HorizontalLayout cardHeader = new HorizontalLayout(title, addEntry);
         cardHeader.setWidthFull();
         cardHeader.setAlignItems(FlexComponent.Alignment.CENTER);
         cardHeader.setJustifyContentMode(FlexComponent.JustifyContentMode.BETWEEN);
-        cardHeader.getStyle().set("margin-bottom", "10px").set("direction", "rtl");
+        cardHeader.getStyle().set("margin-bottom", "10px");
 
-        // Grid — no Date column (all rows are today)
         sessionsGrid = new Grid<>(Attendance.class, false);
         sessionsGrid.addThemeVariants(GridVariant.LUMO_NO_BORDER, GridVariant.LUMO_COMPACT);
-        sessionsGrid.getStyle().set("direction", "ltr");
 
         Binder<Attendance> binder = new Binder<>(Attendance.class);
         sessionsGrid.getEditor().setBinder(binder);
@@ -225,7 +207,7 @@ public class TimeClockView extends VerticalLayout {
         editorEndPicker   = new TimePicker(); editorEndPicker.setWidthFull();
         TextField noteEd  = new TextField(); noteEd.setWidthFull();
 
-        binder.forField(editorStartPicker).asRequired("שדה חובה")
+        binder.forField(editorStartPicker).asRequired(i18n.translate("validation.required"))
                 .bind(a -> a.getStartTime() != null
                                 ? a.getStartTime().atZoneSameInstant(IL_ZONE).toLocalTime() : null,
                       (a, lt) -> {});
@@ -252,27 +234,29 @@ public class TimeClockView extends VerticalLayout {
         editorActions.setSpacing(false); editorActions.setPadding(false);
 
         sessionsGrid.addColumn(a -> a.getStartTime() != null
-                ? a.getStartTime().atZoneSameInstant(IL_ZONE).format(TIME_FMT) : "—")
-                .setHeader("כניסה").setWidth("80px").setFlexGrow(0)
+                ? a.getStartTime().atZoneSameInstant(IL_ZONE).format(TIME_FMT)
+                : i18n.translate("common.emDash"))
+                .setHeader(i18n.translate("view.timeClock.column.entry")).setWidth("80px").setFlexGrow(0)
                 .setEditorComponent(editorStartPicker);
 
         sessionsGrid.addColumn(a -> a.getEndTime() != null
-                ? a.getEndTime().atZoneSameInstant(IL_ZONE).format(TIME_FMT) : "—")
-                .setHeader("יציאה").setWidth("80px").setFlexGrow(0)
+                ? a.getEndTime().atZoneSameInstant(IL_ZONE).format(TIME_FMT)
+                : i18n.translate("common.emDash"))
+                .setHeader(i18n.translate("view.timeClock.column.exit")).setWidth("80px").setFlexGrow(0)
                 .setEditorComponent(editorEndPicker);
 
         sessionsGrid.addColumn(a -> {
-            if (a.getDurationSeconds() == null) return "—";
+            if (a.getDurationSeconds() == null) return i18n.translate("common.emDash");
             long h = a.getDurationSeconds() / 3600;
             long m = (a.getDurationSeconds() % 3600) / 60;
-            return h + "h " + String.format("%02d", m) + "m";
-        }).setHeader("משך").setWidth("80px").setFlexGrow(0);
+            return i18n.translate("common.duration.hoursMinutes", h, String.format("%02d", m));
+        }).setHeader(i18n.translate("view.timeClock.column.duration")).setWidth("80px").setFlexGrow(0);
 
         sessionsGrid.addColumn(a -> a.getNote() != null ? a.getNote() : "")
-                .setHeader("הערה").setFlexGrow(1).setEditorComponent(noteEd);
+                .setHeader(i18n.translate("view.timeClock.column.note")).setFlexGrow(1).setEditorComponent(noteEd);
 
         sessionsGrid.addComponentColumn(a -> statusBadge(a.getApprovalStatus()))
-                .setHeader("סטטוס").setWidth("100px").setFlexGrow(0);
+                .setHeader(i18n.translate("view.timeClock.column.status")).setWidth("100px").setFlexGrow(0);
 
         sessionsGrid.addComponentColumn(a -> {
             Button edit = iconBtn(VaadinIcon.PENCIL, ButtonVariant.LUMO_TERTIARY);
@@ -290,7 +274,7 @@ public class TimeClockView extends VerticalLayout {
         todayTotalSpan = new Span();
         todayTotalSpan.getStyle()
                 .set("font-size", "13px").set("font-weight", "600").set("color", "#1565c0")
-                .set("margin-top", "6px").set("display", "block").set("text-align", "right");
+                .set("margin-top", "6px").set("display", "block").set("text-align", "end");
 
         card.add(cardHeader, sessionsGrid, todayTotalSpan);
         add(card);
@@ -311,7 +295,7 @@ public class TimeClockView extends VerticalLayout {
         LocalTime end   = editorEndPicker.getValue();
 
         if (start == null) {
-            showError("שעת כניסה נדרשת.");
+            showError(i18n.translate("view.timeClock.error.entryTimeRequired"));
             return;
         }
         OffsetDateTime oStart = start.atDate(today).atZone(IL_ZONE).toOffsetDateTime();
@@ -319,16 +303,21 @@ public class TimeClockView extends VerticalLayout {
 
         try {
             if (item.getId() == null) {
-                if (oEnd == null) { showError("שעת יציאה נדרשת."); return; }
+                if (oEnd == null) {
+                    showError(i18n.translate("view.timeClock.error.exitTimeRequired"));
+                    return;
+                }
                 attendanceService.createManualEntry(currentUserId, oStart, oEnd, item.getNote());
                 pendingNewRow = null;
                 refreshTodaySessions();
-                Notification.show("הרשומה נשלחה לאישור מנהל.", 4000, Notification.Position.BOTTOM_CENTER)
+                Notification.show(i18n.translate("notification.timeClock.recordSentForApproval"),
+                        4000, Notification.Position.BOTTOM_CENTER)
                         .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
             } else {
                 attendanceService.editSession(item.getId(), oStart, oEnd);
                 refreshTodaySessions();
-                Notification.show("הרשומה עודכנה.", 3000, Notification.Position.BOTTOM_CENTER)
+                Notification.show(i18n.translate("notification.timeClock.recordUpdated"),
+                        3000, Notification.Position.BOTTOM_CENTER)
                         .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
             }
         } catch (Exception ex) {
@@ -337,16 +326,11 @@ public class TimeClockView extends VerticalLayout {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  LEAVE / ABSENCE REPORTS CARD
-    // ══════════════════════════════════════════════════════════════════════════
-
     private void buildLeaveReportsCard() {
         Div card = card();
-        card.getStyle().set("direction", "rtl");
 
-        Span title = sectionLabel("דיווחי חופשה / היעדרות");
-        Button addBtn = new Button("+ הוסף דיווח",
+        Span title = sectionLabel(i18n.translate("view.timeClock.section.leaveReports"));
+        Button addBtn = new Button(i18n.translate("view.timeClock.addReport"),
                 e -> addReportPanel.setVisible(!addReportPanel.isVisible()));
         addBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
@@ -356,41 +340,44 @@ public class TimeClockView extends VerticalLayout {
         hdr.setJustifyContentMode(FlexComponent.JustifyContentMode.BETWEEN);
         hdr.getStyle().set("margin-bottom", "10px");
 
-        // Add report panel
         addReportPanel = new VerticalLayout();
         addReportPanel.setPadding(true);
         addReportPanel.setSpacing(true);
         addReportPanel.setVisible(false);
         addReportPanel.getStyle()
                 .set("background", "#f8f9fa").set("border-radius", "8px")
-                .set("border", "1px solid #e0e0e0").set("margin-bottom", "12px")
-                .set("direction", "rtl");
+                .set("border", "1px solid #e0e0e0").set("margin-bottom", "12px");
 
-        reportTypeSelect = new ComboBox<>("סוג");
+        reportTypeSelect = new ComboBox<>(i18n.translate("view.timeClock.field.type"));
         reportTypeSelect.setItems(AttendanceReportType.values());
-        reportTypeSelect.setItemLabelGenerator(TimeClockView::typeLabel);
+        reportTypeSelect.setItemLabelGenerator(i18n::translateEnum);
         reportTypeSelect.setValue(AttendanceReportType.VACATION);
         reportTypeSelect.setWidth("200px");
 
-        reportDatePicker = new com.vaadin.flow.component.datepicker.DatePicker("תאריך");
+        reportDatePicker = new com.vaadin.flow.component.datepicker.DatePicker(
+                i18n.translate("view.timeClock.field.date"));
         reportDatePicker.setValue(LocalDate.now());
         reportDatePicker.setWidth("170px");
 
-        reportEntryPicker = new TimePicker("כניסה"); reportEntryPicker.setWidth("130px");
-        reportExitPicker  = new TimePicker("יציאה"); reportExitPicker.setWidth("130px");
+        reportEntryPicker = new TimePicker(i18n.translate("view.timeClock.column.entry"));
+        reportEntryPicker.setWidth("130px");
+        reportExitPicker  = new TimePicker(i18n.translate("view.timeClock.column.exit"));
+        reportExitPicker.setWidth("130px");
         reportTimesRow = new HorizontalLayout(reportEntryPicker, reportExitPicker);
         reportTimesRow.setSpacing(true);
         reportTimesRow.setVisible(false);
         reportTypeSelect.addValueChangeListener(e ->
                 reportTimesRow.setVisible(e.getValue() == AttendanceReportType.PRESENCE));
 
-        reportNoteField = new TextField("הערה");
+        reportNoteField = new TextField(i18n.translate("view.timeClock.field.note"));
         reportNoteField.setWidth("260px");
-        reportNoteField.setPlaceholder("סיבה (אופציונלי)…");
+        reportNoteField.setPlaceholder(i18n.translate("view.timeClock.note.reasonPlaceholder"));
 
-        Button submitBtn = new Button("שלח", VaadinIcon.CHECK.create(), e -> doSubmitReport());
+        Button submitBtn = new Button(i18n.translate("common.submit"), VaadinIcon.CHECK.create(),
+                e -> doSubmitReport());
         submitBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
-        Button cancelBtn = new Button("ביטול", e -> addReportPanel.setVisible(false));
+        Button cancelBtn = new Button(i18n.translate("common.cancel"),
+                e -> addReportPanel.setVisible(false));
         cancelBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
         HorizontalLayout formRow = new HorizontalLayout(
@@ -401,31 +388,34 @@ public class TimeClockView extends VerticalLayout {
 
         addReportPanel.add(formRow, new HorizontalLayout(submitBtn, cancelBtn));
 
-        // Reports grid
         reportsGrid = new Grid<>(AttendanceReportResponse.class, false);
         reportsGrid.addThemeVariants(GridVariant.LUMO_NO_BORDER, GridVariant.LUMO_COMPACT);
-        reportsGrid.getStyle().set("direction", "ltr");
 
         reportsGrid.addColumn(r -> r.reportDate().format(DateTimeFormatter.ofPattern("dd MMM")))
-                .setHeader("תאריך").setWidth("80px").setFlexGrow(0);
+                .setHeader(i18n.translate("view.timeClock.field.date")).setWidth("80px").setFlexGrow(0);
         reportsGrid.addComponentColumn(r -> typeBadge(r.reportType()))
-                .setHeader("סוג").setWidth("140px").setFlexGrow(0);
-        reportsGrid.addColumn(r -> r.durationFormatted() != null ? r.durationFormatted() : "יום מלא")
-                .setHeader("משך").setWidth("80px").setFlexGrow(0);
+                .setHeader(i18n.translate("view.timeClock.field.type")).setWidth("140px").setFlexGrow(0);
+        reportsGrid.addColumn(r -> r.durationFormatted() != null
+                ? r.durationFormatted()
+                : i18n.translate("view.timeClock.fullDay"))
+                .setHeader(i18n.translate("view.timeClock.column.duration")).setWidth("80px").setFlexGrow(0);
         reportsGrid.addColumn(r -> r.note() != null ? r.note() : "")
-                .setHeader("הערה").setFlexGrow(1);
+                .setHeader(i18n.translate("view.timeClock.column.note")).setFlexGrow(1);
         reportsGrid.addComponentColumn(r -> {
             Button del = iconBtn(VaadinIcon.TRASH, ButtonVariant.LUMO_ERROR);
             del.addClickListener(e -> {
-                ConfirmDialog cd = new ConfirmDialog("מחיקת דיווח",
-                        "למחוק את דיווח " + typeLabel(r.reportType()) + " ל-"
-                                + r.reportDate().format(DateTimeFormatter.ofPattern("dd/MM")) + "?",
-                        "מחק", ev -> {
+                ConfirmDialog cd = new ConfirmDialog(
+                        i18n.translate("dialog.timeClock.deleteReport.title"),
+                        i18n.translate("dialog.timeClock.deleteReport.message",
+                                i18n.translateEnum(r.reportType()),
+                                r.reportDate().format(DateTimeFormatter.ofPattern("dd/MM"))),
+                        i18n.translate("common.delete"), ev -> {
                             reportService.deleteReport(r.id());
                             refreshLeaveReports();
-                            Notification.show("הדיווח נמחק.", 2000, Notification.Position.BOTTOM_CENTER);
+                            Notification.show(i18n.translate("notification.timeClock.reportDeleted"),
+                                    2000, Notification.Position.BOTTOM_CENTER);
                         },
-                        "ביטול", ev -> {});
+                        i18n.translate("common.cancel"), ev -> {});
                 cd.setConfirmButtonTheme("error primary");
                 cd.open();
             });
@@ -442,14 +432,23 @@ public class TimeClockView extends VerticalLayout {
     private void doSubmitReport() {
         AttendanceReportType type = reportTypeSelect.getValue();
         LocalDate date = reportDatePicker.getValue();
-        if (type == null) { showError("סוג הדיווח נדרש."); return; }
-        if (date == null) { showError("תאריך נדרש."); return; }
+        if (type == null) {
+            showError(i18n.translate("view.timeClock.error.reportTypeRequired"));
+            return;
+        }
+        if (date == null) {
+            showError(i18n.translate("view.timeClock.error.dateRequired"));
+            return;
+        }
 
         LocalTime entry = null, exit = null;
         if (type == AttendanceReportType.PRESENCE) {
             entry = reportEntryPicker.getValue();
             exit  = reportExitPicker.getValue();
-            if (entry == null || exit == null) { showError("שעות כניסה ויציאה נדרשות."); return; }
+            if (entry == null || exit == null) {
+                showError(i18n.translate("view.timeClock.error.entryExitRequired"));
+                return;
+            }
         }
         String note = reportNoteField.getValue().isBlank() ? null : reportNoteField.getValue();
         try {
@@ -458,29 +457,22 @@ public class TimeClockView extends VerticalLayout {
             addReportPanel.setVisible(false);
             reportNoteField.clear(); reportEntryPicker.clear(); reportExitPicker.clear();
             refreshLeaveReports();
-            Notification.show(typeLabel(type) + " נוסף.", 3000, Notification.Position.BOTTOM_CENTER)
+            Notification.show(i18n.translate("notification.timeClock.reportAdded",
+                            i18n.translateEnum(type)),
+                    3000, Notification.Position.BOTTOM_CENTER)
                     .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         } catch (Exception ex) { showError(ex.getMessage()); }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  HOLIDAYS SECTION
-    // ══════════════════════════════════════════════════════════════════════════
-
     private void buildHolidaysSection() {
         Div card = card();
-        card.getStyle().set("direction", "rtl");
-        card.add(sectionLabel("חגים קרובים (90 יום הקרובים)"));
+        card.add(sectionLabel(i18n.translate("view.timeClock.section.upcomingHolidays")));
         holidayList = new VerticalLayout();
         holidayList.setSpacing(false);
         holidayList.setPadding(false);
         card.add(holidayList);
         add(card);
     }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    //  REFRESH
-    // ══════════════════════════════════════════════════════════════════════════
 
     private void refreshAll() {
         refreshStatus();
@@ -492,14 +484,14 @@ public class TimeClockView extends VerticalLayout {
     private void refreshStatus() {
         attendanceService.findActiveSession(currentUserId).ifPresentOrElse(s -> {
             statusDot.getStyle().set("background", "#43a047");
-            statusText.setText("מחוברת — פעילות");
+            statusText.setText(i18n.translate("view.timeClock.status.connected"));
             String since = s.getStartTime().atZoneSameInstant(IL_ZONE).format(TIME_FMT);
-            sinceLabel.setText("שעת כניסה: " + since);
+            sinceLabel.setText(i18n.translate("view.timeClock.status.entryTime", since));
             clockInBtn.setEnabled(false);
             clockOutBtn.setEnabled(true);
         }, () -> {
             statusDot.getStyle().set("background", "#bdbdbd");
-            statusText.setText("לא מחובר/ת");
+            statusText.setText(i18n.translate("view.timeClock.status.disconnected"));
             sinceLabel.setText("");
             clockInBtn.setEnabled(true);
             clockOutBtn.setEnabled(false);
@@ -527,7 +519,7 @@ public class TimeClockView extends VerticalLayout {
                 .mapToLong(Attendance::getDurationSeconds).sum();
         if (totalSec > 0) {
             long h = totalSec / 3600, m = (totalSec % 3600) / 60;
-            todayTotalSpan.setText(String.format("סה\"כ היום: %dh %02dm", h, m));
+            todayTotalSpan.setText(i18n.translate("view.timeClock.todayTotal", h, String.format("%02d", m)));
         } else {
             todayTotalSpan.setText("");
         }
@@ -546,7 +538,7 @@ public class TimeClockView extends VerticalLayout {
         List<Holiday> holidays = holidayRepository.findByDateBetween(today, today.plusDays(90))
                 .stream().limit(8).toList();
         if (holidays.isEmpty()) {
-            Span none = new Span("אין חגים בקרוב.");
+            Span none = new Span(i18n.translate("view.timeClock.noUpcomingHolidays"));
             none.getStyle().set("font-size", "13px").set("color", "#999");
             holidayList.add(none);
             return;
@@ -556,7 +548,8 @@ public class TimeClockView extends VerticalLayout {
             d.getStyle().set("min-width", "90px").set("color", "#888").set("font-size", "13px");
             Span n = new Span(h.getName());
             n.getStyle().set("flex", "1").set("font-weight", "500");
-            Span c = new Span(h.getCreditHours().stripTrailingZeros().toPlainString() + "h");
+            Span c = new Span(i18n.translate("common.hoursSuffix",
+                    h.getCreditHours().stripTrailingZeros().toPlainString()));
             c.getStyle().set("color", "#2e7d32").set("font-size", "13px").set("font-weight", "700");
             Div row = new Div(d, n, c);
             row.getStyle().set("display", "flex").set("gap", "12px").set("align-items", "center")
@@ -565,17 +558,14 @@ public class TimeClockView extends VerticalLayout {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CLOCK IN / OUT
-    // ══════════════════════════════════════════════════════════════════════════
-
     private void doPunchIn() {
         try {
             String note = clockNoteField.getValue().isBlank() ? null : clockNoteField.getValue();
             attendanceService.punchIn(currentUserId, note, "MANUAL");
             clockNoteField.clear();
             refreshAll();
-            Notification.show("כניסה נרשמה בהצלחה", 3000, Notification.Position.BOTTOM_CENTER)
+            Notification.show(i18n.translate("notification.timeClock.clockInSuccess"),
+                    3000, Notification.Position.BOTTOM_CENTER)
                     .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         } catch (Exception e) { showError(e.getMessage()); }
     }
@@ -584,14 +574,11 @@ public class TimeClockView extends VerticalLayout {
         try {
             attendanceService.punchOut(currentUserId);
             refreshAll();
-            Notification.show("יציאה נרשמה בהצלחה", 3000, Notification.Position.BOTTOM_CENTER)
+            Notification.show(i18n.translate("notification.timeClock.clockOutSuccess"),
+                    3000, Notification.Position.BOTTOM_CENTER)
                     .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         } catch (Exception e) { showError(e.getMessage()); }
     }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    //  VISUAL HELPERS
-    // ══════════════════════════════════════════════════════════════════════════
 
     private static Div card() {
         Div card = new Div();
@@ -617,38 +604,22 @@ public class TimeClockView extends VerticalLayout {
         return b;
     }
 
-    private static Span statusBadge(AttendanceApprovalStatus status) {
+    private Span statusBadge(AttendanceApprovalStatus status) {
         if (status == null) return new Span();
-        String label = switch (status) {
-            case PENDING  -> "ממתין";
-            case APPROVED -> "אושר";
-            case REJECTED -> "נדחה";
-        };
         String bg    = switch (status) {
             case PENDING  -> "#fff8e1"; case APPROVED -> "#e8f5e9"; case REJECTED -> "#ffebee";
         };
         String color = switch (status) {
             case PENDING  -> "#f57f17"; case APPROVED -> "#2e7d32"; case REJECTED -> "#c62828";
         };
-        Span s = new Span(label);
+        Span s = new Span(i18n.translateEnum(status));
         s.getStyle().set("background", bg).set("color", color)
                 .set("padding", "2px 8px").set("border-radius", "10px")
                 .set("font-size", "11px").set("font-weight", "600").set("white-space", "nowrap");
         return s;
     }
 
-    static String typeLabel(AttendanceReportType t) {
-        return switch (t) {
-            case PRESENCE     -> "נוכחות";
-            case VACATION     -> "חופשה";
-            case SICK         -> "מחלה";
-            case RESERVE_DUTY -> "מילואים";
-            case HOLIDAY      -> "חג";
-            case ABSENCE      -> "היעדרות";
-        };
-    }
-
-    private static Span typeBadge(AttendanceReportType t) {
+    private Span typeBadge(AttendanceReportType t) {
         String[] style = switch (t) {
             case PRESENCE     -> new String[]{"#e8f5e9", "#2e7d32"};
             case VACATION     -> new String[]{"#e3f2fd", "#1565c0"};
@@ -657,7 +628,7 @@ public class TimeClockView extends VerticalLayout {
             case HOLIDAY      -> new String[]{"#e0f7fa", "#00838f"};
             case ABSENCE      -> new String[]{"#ffebee", "#c62828"};
         };
-        Span s = new Span(typeLabel(t));
+        Span s = new Span(i18n.translateEnum(t));
         s.getStyle().set("background", style[0]).set("color", style[1])
                 .set("padding", "2px 10px").set("border-radius", "10px")
                 .set("font-size", "12px").set("font-weight", "600").set("white-space", "nowrap");

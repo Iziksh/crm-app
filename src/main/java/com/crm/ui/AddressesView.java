@@ -8,6 +8,7 @@ import com.crm.dto.response.ContactResponse;
 import com.crm.service.AccountService;
 import com.crm.service.AddressService;
 import com.crm.service.ContactService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -23,19 +24,19 @@ import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.router.PageTitle;
-import com.vaadin.flow.router.Route;
 import com.vaadin.flow.data.provider.DataProvider;
+import com.vaadin.flow.router.HasDynamicTitle;
+import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 
 @Route(value = "addresses", layout = MainLayout.class)
-@PageTitle("Addresses | CRM")
 @PermitAll
-public class AddressesView extends VerticalLayout {
+public class AddressesView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final AddressService addressService;
     private final AccountService accountService;
     private final ContactService contactService;
@@ -44,9 +45,10 @@ public class AddressesView extends VerticalLayout {
     private Long activeAccountId = null;
     private Long activeContactId = null;
 
-    public AddressesView(AddressService addressService,
+    public AddressesView(TranslationService i18n, AddressService addressService,
                          AccountService accountService,
                          ContactService contactService) {
+        this.i18n = i18n;
         this.addressService = addressService;
         this.accountService = accountService;
         this.contactService = contactService;
@@ -56,7 +58,7 @@ public class AddressesView extends VerticalLayout {
         configureGrid();
 
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Addresses"), toolbar, grid);
+        add(new H2(i18n.translate("view.addresses.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -74,20 +76,27 @@ public class AddressesView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("pageTitle.addresses");
+    }
+
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(AddressResponse::type).setHeader("Type").setSortable(true);
-        grid.addColumn(AddressResponse::street).setHeader("Street").setFlexGrow(2);
-        grid.addColumn(AddressResponse::city).setHeader("City").setSortable(true);
-        grid.addColumn(AddressResponse::state).setHeader("State").setSortable(true);
-        grid.addColumn(AddressResponse::country).setHeader("Country").setSortable(true);
-        grid.addColumn(AddressResponse::accountName).setHeader("Account");
-        grid.addColumn(AddressResponse::contactName).setHeader("Contact");
+        grid.addColumn(a -> i18n.translateEnum(a.type())).setHeader(i18n.translate("common.column.type")).setSortable(true);
+        grid.addColumn(AddressResponse::street).setHeader(i18n.translate("view.addresses.column.street")).setFlexGrow(2);
+        grid.addColumn(AddressResponse::city).setHeader(i18n.translate("view.addresses.column.city")).setSortable(true);
+        grid.addColumn(AddressResponse::state).setHeader(i18n.translate("view.addresses.column.state")).setSortable(true);
+        grid.addColumn(AddressResponse::country).setHeader(i18n.translate("view.addresses.column.country")).setSortable(true);
+        grid.addColumn(AddressResponse::accountName).setHeader(i18n.translate("common.column.account"));
+        grid.addColumn(AddressResponse::contactName).setHeader(i18n.translate("common.column.contact"));
         grid.addComponentColumn(address -> {
-            Span badge = new Span(address.enabled() ? "Active" : "Disabled");
+            Span badge = new Span(address.enabled()
+                    ? i18n.translate("view.addresses.status.active")
+                    : i18n.translate("view.addresses.status.disabled"));
             badge.getElement().getThemeList().add(address.enabled() ? "badge success" : "badge error");
             return badge;
-        }).setHeader("Status").setFlexGrow(0).setWidth("100px");
+        }).setHeader(i18n.translate("common.column.status")).setFlexGrow(0).setWidth("100px");
         grid.addComponentColumn(address -> {
             Button toggle = new Button(address.enabled() ? VaadinIcon.EYE_SLASH.create() : VaadinIcon.EYE.create(),
                     e -> {
@@ -102,19 +111,19 @@ public class AddressesView extends VerticalLayout {
             HorizontalLayout actions = new HorizontalLayout(toggle, edit, delete);
             actions.setSpacing(false);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("160px");
+        }).setHeader(i18n.translate("common.column.actions")).setFlexGrow(0).setWidth("160px");
     }
 
     private HorizontalLayout buildToolbar() {
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> accountFilter = new ComboBox<>("Filter by Account");
+        ComboBox<AccountResponse> accountFilter = new ComboBox<>(i18n.translate("view.addresses.filter.account"));
         accountFilter.setItems(accounts);
         accountFilter.setItemLabelGenerator(AccountResponse::name);
         accountFilter.setClearButtonVisible(true);
         accountFilter.setWidth("200px");
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contactFilter = new ComboBox<>("Filter by Contact");
+        ComboBox<ContactResponse> contactFilter = new ComboBox<>(i18n.translate("view.addresses.filter.contact"));
         contactFilter.setItems(contacts);
         contactFilter.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contactFilter.setClearButtonVisible(true);
@@ -133,7 +142,7 @@ public class AddressesView extends VerticalLayout {
             refreshGrid(null, null);
         });
 
-        Button addBtn = new Button("New Address", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.addresses.button.new"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
         HorizontalLayout toolbar = new HorizontalLayout(accountFilter, contactFilter, addBtn);
@@ -147,26 +156,29 @@ public class AddressesView extends VerticalLayout {
 
     private void openDialog(AddressResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Address" : "Edit Address");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.addresses.dialog.new")
+                : i18n.translate("view.addresses.dialog.edit"));
         dialog.setWidth("520px");
 
-        ComboBox<AddressType> type = new ComboBox<>("Type");
+        ComboBox<AddressType> type = new ComboBox<>(i18n.translate("common.column.type"));
         type.setItems(AddressType.values());
+        type.setItemLabelGenerator(i18n::translateEnum);
 
-        TextField street = new TextField("Street");
-        TextField city = new TextField("City");
-        TextField state = new TextField("State");
-        TextField postalCode = new TextField("Postal Code");
-        TextField country = new TextField("Country");
+        TextField street = new TextField(i18n.translate("view.addresses.column.street"));
+        TextField city = new TextField(i18n.translate("view.addresses.column.city"));
+        TextField state = new TextField(i18n.translate("view.addresses.column.state"));
+        TextField postalCode = new TextField(i18n.translate("view.addresses.field.postalCode"));
+        TextField country = new TextField(i18n.translate("view.addresses.column.country"));
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> accountBox = new ComboBox<>("Account");
+        ComboBox<AccountResponse> accountBox = new ComboBox<>(i18n.translate("common.column.account"));
         accountBox.setItems(accounts);
         accountBox.setItemLabelGenerator(AccountResponse::name);
         accountBox.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contactBox = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contactBox = new ComboBox<>(i18n.translate("common.column.contact"));
         contactBox.setItems(contacts);
         contactBox.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contactBox.setClearButtonVisible(true);
@@ -196,7 +208,7 @@ public class AddressesView extends VerticalLayout {
         form.setColspan(street, 2);
         dialog.add(form);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("dialog.save"), e -> {
             Long accountId = accountBox.getValue() != null ? accountBox.getValue().id() : null;
             Long contactId = contactBox.getValue() != null ? contactBox.getValue().id() : null;
             AddressRequest req = new AddressRequest(
@@ -208,33 +220,33 @@ public class AddressesView extends VerticalLayout {
                 else addressService.update(existing.id(), req);
                 refreshGrid(null, null);
                 dialog.close();
-                notify("Address saved", false);
+                notify(i18n.translate("notification.address.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button cancel = new Button("Cancel", e -> dialog.close());
+        Button cancel = new Button(i18n.translate("dialog.cancel"), e -> dialog.close());
         dialog.getFooter().add(cancel, save);
         dialog.open();
     }
 
     private void confirmDelete(AddressResponse address) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Address");
-        confirm.setText("Delete this address?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.addresses.delete.header"));
+        confirm.setText(i18n.translate("view.addresses.delete.text"));
+        confirm.setConfirmText(i18n.translate("dialog.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             addressService.delete(address.id());
             refreshGrid(null, null);
-            notify("Address deleted", false);
+            notify(i18n.translate("notification.address.deleted"), false);
         });
         confirm.open();
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

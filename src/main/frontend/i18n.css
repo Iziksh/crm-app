@@ -1,0 +1,57 @@
+/* Global RTL/LTR layout helpers — direction is set on <html> via LocaleService */
+
+/* Navigation */
+[dir="rtl"] vaadin-side-nav,
+vaadin-side-nav {
+    text-align: start;
+}
+
+/* Directional icons: mirror in RTL so arrows follow reading direction */
+[dir="rtl"] vaadin-icon[icon="vaadin:angle-left"],
+[dir="rtl"] vaadin-icon[icon="vaadin:angle-right"],
+[dir="rtl"] vaadin-icon[icon="vaadin:arrow-forward"],
+[dir="rtl"] vaadin-icon[icon="vaadin:arrow-back"],
+[dir="rtl"] vaadin-icon[icon="vaadin:arrow-left"],
+[dir="rtl"] vaadin-icon[icon="vaadin:arrow-right"],
+[dir="rtl"] vaadin-icon[icon="vaadin:chevron-left"],
+[dir="rtl"] vaadin-icon[icon="vaadin:chevron-right"] {
+    transform: scaleX(-1);
+}
+
+/* Grids and tables */
+vaadin-grid {
+    text-align: start;
+}
+
+vaadin-grid::part(header-cell),
+vaadin-grid::part(body-cell) {
+    text-align: start;
+}
+
+/* Forms */
+vaadin-form-layout,
+vaadin-text-field,
+vaadin-text-area,
+vaadin-combo-box,
+vaadin-select,
+vaadin-date-picker,
+vaadin-time-picker {
+    text-align: start;
+}
+
+/* Dialogs */
+vaadin-dialog-overlay::part(footer) {
+    justify-content: end;
+}
+
+vaadin-confirm-dialog-overlay::part(footer) {
+    justify-content: end;
+}
+
+/* App header: allow wrapping on narrow screens */
+@media (max-width: 768px) {
+    vaadin-app-layout::part(navbar) {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+}

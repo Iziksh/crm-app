@@ -14,6 +14,7 @@ import com.crm.service.ContactService;
 import com.crm.service.ProductService;
 import com.crm.service.QuoteService;
 import com.crm.service.SalesOrderService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -33,9 +34,9 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.NumberField;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.router.PageTitle;
-import com.vaadin.flow.router.Route;
 import com.vaadin.flow.data.provider.DataProvider;
+import com.vaadin.flow.router.HasDynamicTitle;
+import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -43,10 +44,10 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Route(value = "sales-orders", layout = MainLayout.class)
-@PageTitle("Sales Orders | CRM")
 @RolesAllowed({"SALES", "ADMIN"})
-public class SalesOrdersView extends VerticalLayout {
+public class SalesOrdersView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final SalesOrderService salesOrderService;
     private final AccountService accountService;
     private final ContactService contactService;
@@ -55,7 +56,7 @@ public class SalesOrdersView extends VerticalLayout {
 
     private final Grid<SalesOrderResponse> grid = new Grid<>(SalesOrderResponse.class, false);
     private final Grid<SalesOrderLineItemResponse> lineItemGrid = new Grid<>(SalesOrderLineItemResponse.class, false);
-    private final ComboBox<SalesOrderStatus> statusFilter = new ComboBox<>("Status");
+    private final ComboBox<SalesOrderStatus> statusFilter = new ComboBox<>();
     private final VerticalLayout detailPanel = new VerticalLayout();
 
     private SalesOrderResponse selectedOrder = null;
@@ -64,19 +65,21 @@ public class SalesOrdersView extends VerticalLayout {
                            AccountService accountService,
                            ContactService contactService,
                            QuoteService quoteService,
-                           ProductService productService) {
+                           ProductService productService,
+                           TranslationService i18n) {
         this.salesOrderService = salesOrderService;
         this.accountService = accountService;
         this.contactService = contactService;
         this.quoteService = quoteService;
         this.productService = productService;
+        this.i18n = i18n;
         setSizeFull();
         setPadding(true);
 
         configureGrid();
         configureDetailPanel();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Sales Orders"), toolbar, grid, detailPanel);
+        add(new H2(i18n.translate("view.salesOrders.title")), toolbar, grid, detailPanel);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -89,14 +92,19 @@ public class SalesOrdersView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.salesOrders");
+    }
+
     private void configureGrid() {
         grid.setHeight("400px");
-        grid.addColumn(SalesOrderResponse::orderNumber).setHeader("Order #").setFlexGrow(0).setWidth("130px");
-        grid.addColumn(SalesOrderResponse::accountName).setHeader("Account").setSortable(true).setFlexGrow(2);
-        grid.addComponentColumn(o -> statusBadge(o.status())).setHeader("Status").setFlexGrow(0).setWidth("120px");
-        grid.addColumn(o -> o.totalAmount() != null ? o.currency() + " " + o.totalAmount() : "").setHeader("Total");
-        grid.addColumn(o -> o.orderDate() != null ? o.orderDate().toString() : "").setHeader("Order Date");
-        grid.addColumn(o -> o.deliveryDate() != null ? o.deliveryDate().toString() : "").setHeader("Delivery Date");
+        grid.addColumn(SalesOrderResponse::orderNumber).setHeader(i18n.translate("view.salesOrders.column.orderNumber")).setFlexGrow(0).setWidth("130px");
+        grid.addColumn(SalesOrderResponse::accountName).setHeader(i18n.translate("common.account")).setSortable(true).setFlexGrow(2);
+        grid.addComponentColumn(o -> statusBadge(o.status())).setHeader(i18n.translate("common.status")).setFlexGrow(0).setWidth("120px");
+        grid.addColumn(o -> o.totalAmount() != null ? o.currency() + " " + o.totalAmount() : "").setHeader(i18n.translate("common.total"));
+        grid.addColumn(o -> o.orderDate() != null ? o.orderDate().toString() : "").setHeader(i18n.translate("common.orderDate"));
+        grid.addColumn(o -> o.deliveryDate() != null ? o.deliveryDate().toString() : "").setHeader(i18n.translate("common.deliveryDate"));
         grid.addComponentColumn(order -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
@@ -104,7 +112,7 @@ public class SalesOrdersView extends VerticalLayout {
             if (order.status() == SalesOrderStatus.DELIVERED) {
                 Button convert = new Button(VaadinIcon.FILE_TEXT.create(), e -> convertToContract(order));
                 convert.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SUCCESS);
-                convert.getElement().setAttribute("title", "Convert to Contract");
+                convert.getElement().setAttribute("title", i18n.translate("view.salesOrders.convertToContract"));
                 actions.add(convert);
             }
 
@@ -116,7 +124,7 @@ public class SalesOrdersView extends VerticalLayout {
 
             actions.add(edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("160px");
+        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("160px");
 
         grid.asSingleSelect().addValueChangeListener(e -> {
             selectedOrder = e.getValue();
@@ -128,11 +136,11 @@ public class SalesOrdersView extends VerticalLayout {
         detailPanel.setPadding(false);
         detailPanel.setVisible(false);
 
-        lineItemGrid.addColumn(SalesOrderLineItemResponse::productName).setHeader("Product").setFlexGrow(2);
-        lineItemGrid.addColumn(SalesOrderLineItemResponse::quantity).setHeader("Qty");
-        lineItemGrid.addColumn(SalesOrderLineItemResponse::unitPrice).setHeader("Unit Price");
-        lineItemGrid.addColumn(i -> i.discountPct() + "%").setHeader("Discount");
-        lineItemGrid.addColumn(SalesOrderLineItemResponse::lineTotal).setHeader("Total");
+        lineItemGrid.addColumn(SalesOrderLineItemResponse::productName).setHeader(i18n.translate("common.product")).setFlexGrow(2);
+        lineItemGrid.addColumn(SalesOrderLineItemResponse::quantity).setHeader(i18n.translate("common.qty"));
+        lineItemGrid.addColumn(SalesOrderLineItemResponse::unitPrice).setHeader(i18n.translate("common.unitPrice"));
+        lineItemGrid.addColumn(i -> i.discountPct() + "%").setHeader(i18n.translate("common.discount"));
+        lineItemGrid.addColumn(SalesOrderLineItemResponse::lineTotal).setHeader(i18n.translate("common.total"));
         lineItemGrid.addComponentColumn(item -> {
             Button del = new Button(VaadinIcon.TRASH.create(), e -> {
                 if (selectedOrder != null) {
@@ -153,10 +161,10 @@ public class SalesOrdersView extends VerticalLayout {
         if (selectedOrder == null) { detailPanel.setVisible(false); return; }
         detailPanel.setVisible(true);
 
-        Button addItem = new Button("Add Line Item", VaadinIcon.PLUS.create(), e -> openLineItemDialog());
+        Button addItem = new Button(i18n.translate("common.addLineItem"), VaadinIcon.PLUS.create(), e -> openLineItemDialog());
         addItem.addThemeVariants(ButtonVariant.LUMO_SMALL);
 
-        HorizontalLayout header = new HorizontalLayout(new H4("Line Items"), addItem);
+        HorizontalLayout header = new HorizontalLayout(new H4(i18n.translate("common.lineItems")), addItem);
         header.setDefaultVerticalComponentAlignment(Alignment.CENTER);
 
         SalesOrderResponse fresh = salesOrderService.findById(selectedOrder.id());
@@ -167,20 +175,20 @@ public class SalesOrdersView extends VerticalLayout {
     private void openLineItemDialog() {
         if (selectedOrder == null) return;
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle("Add Line Item");
+        dialog.setHeaderTitle(i18n.translate("common.addLineItem"));
         dialog.setWidth("440px");
 
-        ComboBox<ProductResponse> productCombo = new ComboBox<>("Product");
+        ComboBox<ProductResponse> productCombo = new ComboBox<>(i18n.translate("common.product"));
         productCombo.setItems(productService.findAll(PageRequest.of(0, 500), null).getContent());
         productCombo.setItemLabelGenerator(p -> p.sku() + " — " + p.name());
         productCombo.setClearButtonVisible(true);
         productCombo.setWidthFull();
 
-        TextField productName = new TextField("Product Name");
-        productName.setPlaceholder("Or type manually");
-        NumberField qty = new NumberField("Quantity");
-        NumberField unitPrice = new NumberField("Unit Price");
-        NumberField discount = new NumberField("Discount %");
+        TextField productName = new TextField(i18n.translate("common.productName"));
+        productName.setPlaceholder(i18n.translate("common.orTypeManually"));
+        NumberField qty = new NumberField(i18n.translate("common.quantity"));
+        NumberField unitPrice = new NumberField(i18n.translate("common.unitPrice"));
+        NumberField discount = new NumberField(i18n.translate("common.discountPercent"));
         discount.setValue(0.0);
 
         productCombo.addValueChangeListener(e -> {
@@ -197,7 +205,7 @@ public class SalesOrdersView extends VerticalLayout {
         form.setColspan(productName, 2);
         dialog.add(form);
 
-        Button save = new Button("Add", e -> {
+        Button save = new Button(i18n.translate("common.add"), e -> {
             String name = productName.getValue().isBlank()
                     ? (productCombo.getValue() != null ? productCombo.getValue().name() : "")
                     : productName.getValue();
@@ -213,24 +221,26 @@ public class SalesOrdersView extends VerticalLayout {
                 refreshDetailPanel();
                 refreshGrid();
                 dialog.close();
-                notify("Line item added", false);
+                notify(i18n.translate("view.salesOrders.notification.lineItemAdded"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
     private HorizontalLayout buildToolbar() {
+        statusFilter.setLabel(i18n.translate("common.status"));
         statusFilter.setItems(SalesOrderStatus.values());
-        statusFilter.setPlaceholder("All Statuses");
+        statusFilter.setItemLabelGenerator(i18n::translateEnum);
+        statusFilter.setPlaceholder(i18n.translate("common.allStatuses"));
         statusFilter.setClearButtonVisible(true);
         statusFilter.setWidth("150px");
         statusFilter.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("New Sales Order", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.salesOrders.newOrder"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
         HorizontalLayout toolbar = new HorizontalLayout(statusFilter, addBtn);
@@ -246,7 +256,7 @@ public class SalesOrdersView extends VerticalLayout {
         try {
             salesOrderService.convertToContract(order.id());
             refreshGrid();
-            notify("Sales Order converted to Contract", false);
+            notify(i18n.translate("view.salesOrders.notification.converted"), false);
         } catch (Exception e) {
             notify(e.getMessage(), true);
         }
@@ -254,37 +264,40 @@ public class SalesOrdersView extends VerticalLayout {
 
     private void openDialog(SalesOrderResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Sales Order" : "Edit Sales Order");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.salesOrders.newOrder")
+                : i18n.translate("view.salesOrders.editOrder"));
         dialog.setWidth("600px");
 
-        ComboBox<SalesOrderStatus> status = new ComboBox<>("Status");
+        ComboBox<SalesOrderStatus> status = new ComboBox<>(i18n.translate("common.status"));
         status.setItems(SalesOrderStatus.values());
+        status.setItemLabelGenerator(i18n::translateEnum);
         status.setValue(SalesOrderStatus.PENDING);
 
-        DatePicker orderDate = new DatePicker("Order Date");
-        DatePicker deliveryDate = new DatePicker("Delivery Date");
-        TextField currency = new TextField("Currency");
+        DatePicker orderDate = new DatePicker(i18n.translate("common.orderDate"));
+        DatePicker deliveryDate = new DatePicker(i18n.translate("common.deliveryDate"));
+        TextField currency = new TextField(i18n.translate("common.currency"));
         currency.setValue("USD");
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> account = new ComboBox<>("Account");
+        ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
         account.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contact = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contact = new ComboBox<>(i18n.translate("common.contact"));
         contact.setItems(contacts);
         contact.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contact.setClearButtonVisible(true);
 
         List<QuoteResponse> quotes = quoteService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<QuoteResponse> quote = new ComboBox<>("Quote (optional)");
+        ComboBox<QuoteResponse> quote = new ComboBox<>(i18n.translate("view.salesOrders.quoteOptional"));
         quote.setItems(quotes);
         quote.setItemLabelGenerator(QuoteResponse::quoteNumber);
         quote.setClearButtonVisible(true);
 
-        TextArea notes = new TextArea("Notes");
+        TextArea notes = new TextArea(i18n.translate("common.notes"));
         notes.setMinHeight("80px");
 
         if (existing != null) {
@@ -303,7 +316,7 @@ public class SalesOrdersView extends VerticalLayout {
         form.setColspan(notes, 2);
         dialog.add(form);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("common.save"), e -> {
             SalesOrderRequest req = new SalesOrderRequest(
                     existing != null ? existing.orderNumber() : "SO",
                     status.getValue(), orderDate.getValue(), deliveryDate.getValue(),
@@ -317,21 +330,21 @@ public class SalesOrdersView extends VerticalLayout {
                 else salesOrderService.update(existing.id(), req);
                 refreshGrid();
                 dialog.close();
-                notify("Sales Order saved", false);
+                notify(i18n.translate("view.salesOrders.notification.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
     private void confirmDelete(SalesOrderResponse order) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Sales Order");
-        confirm.setText("Delete order " + order.orderNumber() + "?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.salesOrders.deleteOrder"));
+        confirm.setText(i18n.translate("dialog.deleteOrderConfirm", order.orderNumber()));
+        confirm.setConfirmText(i18n.translate("common.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
@@ -339,14 +352,14 @@ public class SalesOrdersView extends VerticalLayout {
             selectedOrder = null;
             refreshGrid();
             refreshDetailPanel();
-            notify("Sales Order deleted", false);
+            notify(i18n.translate("view.salesOrders.notification.deleted"), false);
         });
         confirm.open();
     }
 
     private Span statusBadge(SalesOrderStatus status) {
         if (status == null) return new Span();
-        Span badge = new Span(status.name());
+        Span badge = new Span(i18n.translateEnum(status));
         String theme = switch (status) {
             case PENDING -> "badge contrast";
             case CONFIRMED -> "badge primary";
@@ -357,7 +370,7 @@ public class SalesOrdersView extends VerticalLayout {
         return badge;
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

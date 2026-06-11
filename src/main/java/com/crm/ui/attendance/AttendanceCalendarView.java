@@ -2,6 +2,7 @@ package com.crm.ui.attendance;
 
 import com.crm.dto.response.UserSummaryResponse;
 import com.crm.repository.UserRepository;
+import com.crm.service.TranslationService;
 import com.crm.service.UserService;
 import com.crm.timetracking.dto.AttendanceReportResponse;
 import com.crm.timetracking.dto.DayCalendarEntry;
@@ -22,7 +23,7 @@ import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.PermitAll;
 
@@ -32,14 +33,13 @@ import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.TextStyle;
-import java.util.Locale;
 
 @CssImport("./attendance-calendar.css")
 @Route(value = "attendance-calendar", layout = MainLayout.class)
-@PageTitle("עדכון נוכחות | CRM")
 @PermitAll
-public class AttendanceCalendarView extends VerticalLayout {
+public class AttendanceCalendarView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final AttendanceReportService reportService;
     private final UserService             userService;
     private final SecurityService         securityService;
@@ -51,7 +51,7 @@ public class AttendanceCalendarView extends VerticalLayout {
     private final Button prevBtn    = new Button(VaadinIcon.ANGLE_LEFT.create());
     private final Button nextBtn    = new Button(VaadinIcon.ANGLE_RIGHT.create());
     private final Span   monthLabel = new Span();
-    private final ComboBox<UserSummaryResponse> userCombo = new ComboBox<>("עובד");
+    private final ComboBox<UserSummaryResponse> userCombo = new ComboBox<>();
 
     private final Span profileName = new Span();
     private final Span profileId   = new Span();
@@ -61,17 +61,20 @@ public class AttendanceCalendarView extends VerticalLayout {
     public AttendanceCalendarView(AttendanceReportService reportService,
                                   UserService userService,
                                   SecurityService securityService,
-                                  UserRepository userRepository) {
+                                  UserRepository userRepository,
+                                  TranslationService i18n) {
         this.reportService   = reportService;
         this.userService     = userService;
         this.securityService = securityService;
         this.userRepository  = userRepository;
+        this.i18n = i18n;
 
-        getElement().setAttribute("dir", "rtl");
         setPadding(false);
         setSpacing(false);
         addClassName("attendance-calendar-page");
         setWidth("100%");
+
+        userCombo.setLabel(i18n.translate("view.attendanceCalendar.field.employee"));
 
         buildProfileSection();
         buildMonthNav();
@@ -83,7 +86,10 @@ public class AttendanceCalendarView extends VerticalLayout {
         initUserContext();
     }
 
-    // ── Profile header ────────────────────────────────────────────────────────
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.attendanceCalendar");
+    }
 
     private void buildProfileSection() {
         Icon userIcon = VaadinIcon.USER.create();
@@ -101,8 +107,6 @@ public class AttendanceCalendarView extends VerticalLayout {
         section.addClassName("profile-section");
         add(section);
     }
-
-    // ── Month navigation ──────────────────────────────────────────────────────
 
     private void buildMonthNav() {
         prevBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ICON);
@@ -128,17 +132,13 @@ public class AttendanceCalendarView extends VerticalLayout {
         userCombo.setWidth("100%");
         userCombo.addClassName("admin-user-picker");
 
-        // RTL layout: DOM order [nextBtn, monthLabel, prevBtn, menuBtn]
-        // renders visually left-to-right as: [menu] [prev] [month] [next]
-        HorizontalLayout nav = new HorizontalLayout(nextBtn, monthLabel, prevBtn, menuBtn);
+        HorizontalLayout nav = new HorizontalLayout(prevBtn, monthLabel, nextBtn, menuBtn);
         nav.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
         nav.addClassName("month-nav-bar");
         nav.setWidthFull();
 
         add(nav, userCombo);
     }
-
-    // ── User context ──────────────────────────────────────────────────────────
 
     private void initUserContext() {
         if (securityService.hasRole("ADMIN")) {
@@ -153,25 +153,21 @@ public class AttendanceCalendarView extends VerticalLayout {
         }
     }
 
-    // ── Refresh ───────────────────────────────────────────────────────────────
-
     void refresh() {
         if (selectedUserId == null) return;
-        Locale he = Locale.forLanguageTag("he");
         monthLabel.setText(
-                currentMonth.getMonth().getDisplayName(TextStyle.FULL, he)
+                currentMonth.getMonth().getDisplayName(TextStyle.FULL, i18n.getCurrentLocale())
                         + " " + currentMonth.getYear());
 
         MonthlyCalendarResponse cal = reportService.getMonthlyCalendar(
                 selectedUserId, currentMonth.getYear(), currentMonth.getMonthValue());
 
         profileName.setText(cal.username());
-        profileId.setText("# " + cal.userId());
+        profileId.setText(i18n.translate("view.attendanceCalendar.userIdPrefix", cal.userId()));
 
         buildCalendarGrid(cal);
 
-        totalLine.setText(String.format(
-                "סה\"כ חודש: %s / תקן: %s  (דלטא: %s)",
+        totalLine.setText(i18n.translate("view.attendanceCalendar.monthTotal",
                 DurationCalculator.formatMinutes(cal.totalWorkedMinutes()),
                 DurationCalculator.formatMinutes(cal.totalStandardMinutes()),
                 DurationCalculator.formatMinutes(Math.abs(cal.totalDeltaMinutes()))));
@@ -182,22 +178,26 @@ public class AttendanceCalendarView extends VerticalLayout {
         refresh();
     }
 
-    // ── Calendar grid ─────────────────────────────────────────────────────────
-
     private void buildCalendarGrid(MonthlyCalendarResponse cal) {
         calGrid.removeAll();
 
-        // Single-letter Hebrew day headers — RTL: Sun on right, Sat on left
-        String[] headers   = {"א", "ב", "ג", "ד", "ה", "ו", "ש"};
+        String[] headerKeys = {
+                "view.attendanceCalendar.dayHeader.sun",
+                "view.attendanceCalendar.dayHeader.mon",
+                "view.attendanceCalendar.dayHeader.tue",
+                "view.attendanceCalendar.dayHeader.wed",
+                "view.attendanceCalendar.dayHeader.thu",
+                "view.attendanceCalendar.dayHeader.fri",
+                "view.attendanceCalendar.dayHeader.sat"
+        };
         boolean[] isSabbat = {false, false, false, false, false, false, true};
-        for (int i = 0; i < headers.length; i++) {
-            Div h = new Div(new Span(headers[i]));
+        for (int i = 0; i < headerKeys.length; i++) {
+            Div h = new Div(new Span(i18n.translate(headerKeys[i])));
             h.addClassName("cal-header-cell");
             if (isSabbat[i]) h.addClassName("cal-header-shabbat");
             calGrid.add(h);
         }
 
-        // Blank leading cells before the 1st
         LocalDate today  = LocalDate.now(ZoneId.of("Asia/Jerusalem"));
         LocalDate first  = YearMonth.of(cal.year(), cal.month()).atDay(1);
         int       offset = israeliDayIndex(first.getDayOfWeek());
@@ -224,8 +224,6 @@ public class AttendanceCalendarView extends VerticalLayout {
         };
     }
 
-    // ── Single day cell ───────────────────────────────────────────────────────
-
     private Div buildDayCell(DayCalendarEntry entry, LocalDate today) {
         Div cell = new Div();
         cell.addClassName("cal-day-cell");
@@ -240,16 +238,13 @@ public class AttendanceCalendarView extends VerticalLayout {
         if (entry.isHoliday()) cell.addClassName("cal-holiday");
 
         if (isAbsent) {
-            // Red X in the time slot, date number also red
-            Span x = new Span("✕");
+            Span x = new Span(i18n.translate("view.attendanceCalendar.absenceMark"));
             x.addClassName("absence-mark");
             cell.add(x);
-            // empty spacer to keep exit-time row consistent
             Span spacer = new Span(" ");
             spacer.addClassName("exit-time");
             cell.add(spacer);
         } else {
-            // Find the PRESENCE report for entry/exit times
             AttendanceReportResponse presence = entry.reports().stream()
                     .filter(r -> r.reportType() == AttendanceReportType.PRESENCE)
                     .findFirst()
@@ -271,13 +266,11 @@ public class AttendanceCalendarView extends VerticalLayout {
             cell.add(exitLbl);
         }
 
-        // Date number
         Span dayNum = new Span(String.valueOf(entry.date().getDayOfMonth()));
         dayNum.addClassName("day-number");
         if (isAbsent) dayNum.addClassName("absent-num");
         cell.add(dayNum);
 
-        // Daily total + delta — shown on workdays with clocked time
         if (entry.totalWorkedMinutes() > 0 && !isSabbat && !isAbsent) {
             Span total = new Span(DurationCalculator.formatMinutes(entry.totalWorkedMinutes()));
             total.addClassName("day-total");
@@ -293,14 +286,12 @@ public class AttendanceCalendarView extends VerticalLayout {
             cell.add(deltaSpan);
         }
 
-        // Holiday name
         if (entry.isHoliday() && entry.holidayName() != null) {
             Span hn = new Span(entry.holidayName());
             hn.addClassName("holiday-name");
             cell.add(hn);
         }
 
-        // Whole cell opens the report editor on click
         cell.addClickListener(e -> {
             AttendanceReportResponse existing =
                     entry.reports().isEmpty() ? null : entry.reports().get(0);
@@ -311,6 +302,6 @@ public class AttendanceCalendarView extends VerticalLayout {
     }
 
     private void openEditor(LocalDate date, AttendanceReportResponse existing) {
-        new AttendanceReportEditor(reportService, this, selectedUserId, date, existing).open();
+        new AttendanceReportEditor(reportService, i18n, this, selectedUserId, date, existing).open();
     }
 }

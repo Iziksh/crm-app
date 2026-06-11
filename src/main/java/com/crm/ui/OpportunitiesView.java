@@ -8,6 +8,7 @@ import com.crm.dto.response.OpportunityResponse;
 import com.crm.service.AccountService;
 import com.crm.service.ContactService;
 import com.crm.service.OpportunityService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -29,7 +30,7 @@ import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
@@ -38,30 +39,32 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Route(value = "opportunities", layout = MainLayout.class)
-@PageTitle("Opportunities | CRM")
 @RolesAllowed({"SALES", "ADMIN"})
-public class OpportunitiesView extends VerticalLayout {
+public class OpportunitiesView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final OpportunityService opportunityService;
     private final AccountService accountService;
     private final ContactService contactService;
 
     private final Grid<OpportunityResponse> grid = new Grid<>(OpportunityResponse.class, false);
-    private final ComboBox<OpportunityStage> stageFilter = new ComboBox<>("Stage");
+    private final ComboBox<OpportunityStage> stageFilter = new ComboBox<>();
     private final TextField searchField = new TextField();
 
     public OpportunitiesView(OpportunityService opportunityService,
                              AccountService accountService,
-                             ContactService contactService) {
+                             ContactService contactService,
+                             TranslationService i18n) {
         this.opportunityService = opportunityService;
         this.accountService = accountService;
         this.contactService = contactService;
+        this.i18n = i18n;
         setSizeFull();
         setPadding(true);
 
         configureGrid();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Opportunities"), toolbar, grid);
+        add(new H2(i18n.translate("view.opportunities.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -76,21 +79,26 @@ public class OpportunitiesView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("page.opportunities");
+    }
+
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(OpportunityResponse::name).setHeader("Name").setSortable(true).setFlexGrow(2);
-        grid.addColumn(OpportunityResponse::accountName).setHeader("Account").setSortable(true);
-        grid.addComponentColumn(o -> stageBadge(o.stage())).setHeader("Stage").setFlexGrow(0).setWidth("130px");
+        grid.addColumn(OpportunityResponse::name).setHeader(i18n.translate("common.name")).setSortable(true).setFlexGrow(2);
+        grid.addColumn(OpportunityResponse::accountName).setHeader(i18n.translate("common.account")).setSortable(true);
+        grid.addComponentColumn(o -> stageBadge(o.stage())).setHeader(i18n.translate("common.stage")).setFlexGrow(0).setWidth("130px");
         grid.addColumn(o -> o.amount() != null ? o.currency() + " " + o.amount() : "")
-                .setHeader("Amount").setSortable(true);
+                .setHeader(i18n.translate("common.amount")).setSortable(true);
         grid.addColumn(o -> o.probability() != null ? o.probability() + "%" : "")
-                .setHeader("Probability");
+                .setHeader(i18n.translate("common.probability"));
         grid.addColumn(o -> o.weightedAmount() != null
                 ? o.currency() + " " + String.format("%.2f", o.weightedAmount()) : "")
-                .setHeader("Weighted");
+                .setHeader(i18n.translate("common.weighted"));
         grid.addColumn(o -> o.closeDate() != null ? o.closeDate().toString() : "")
-                .setHeader("Close Date").setSortable(true);
-        grid.addColumn(OpportunityResponse::assignedToName).setHeader("Assigned To");
+                .setHeader(i18n.translate("common.closeDate")).setSortable(true);
+        grid.addColumn(OpportunityResponse::assignedToName).setHeader(i18n.translate("common.assignedTo"));
         grid.addComponentColumn(opp -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
@@ -103,26 +111,28 @@ public class OpportunitiesView extends VerticalLayout {
 
             actions.add(edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("110px");
+        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("110px");
     }
 
     private HorizontalLayout buildToolbar() {
+        stageFilter.setLabel(i18n.translate("common.stage"));
         stageFilter.setItems(OpportunityStage.values());
-        stageFilter.setPlaceholder("All Stages");
+        stageFilter.setItemLabelGenerator(i18n::translateEnum);
+        stageFilter.setPlaceholder(i18n.translate("view.opportunities.allStages"));
         stageFilter.setClearButtonVisible(true);
         stageFilter.setWidth("160px");
         stageFilter.addValueChangeListener(e -> refreshGrid());
 
-        searchField.setPlaceholder("Search name…");
+        searchField.setPlaceholder(i18n.translate("view.opportunities.searchPlaceholder"));
         searchField.setPrefixComponent(VaadinIcon.SEARCH.create());
         searchField.setClearButtonVisible(true);
         searchField.setValueChangeMode(ValueChangeMode.LAZY);
         searchField.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("New Opportunity", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.opportunities.newOpportunity"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        Button exportBtn = new Button(i18n.translate("common.exportCsv"), VaadinIcon.DOWNLOAD.create());
         exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         exportBtn.addClickListener(e -> {
             com.vaadin.flow.server.StreamResource resource = new com.vaadin.flow.server.StreamResource("opportunities.csv", () -> {
@@ -155,39 +165,42 @@ public class OpportunitiesView extends VerticalLayout {
 
     private void openDialog(OpportunityResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Opportunity" : "Edit Opportunity");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.opportunities.newOpportunity")
+                : i18n.translate("view.opportunities.editOpportunity"));
         dialog.setWidth("600px");
 
-        TextField name = new TextField("Name");
+        TextField name = new TextField(i18n.translate("common.name"));
 
-        ComboBox<OpportunityStage> stage = new ComboBox<>("Stage");
+        ComboBox<OpportunityStage> stage = new ComboBox<>(i18n.translate("common.stage"));
         stage.setItems(OpportunityStage.values());
+        stage.setItemLabelGenerator(i18n::translateEnum);
         stage.setValue(OpportunityStage.PROSPECTING);
 
-        NumberField amount = new NumberField("Amount");
-        TextField currency = new TextField("Currency");
+        NumberField amount = new NumberField(i18n.translate("common.amount"));
+        TextField currency = new TextField(i18n.translate("common.currency"));
         currency.setValue("USD");
 
-        IntegerField probability = new IntegerField("Probability (%)");
+        IntegerField probability = new IntegerField(i18n.translate("view.opportunities.probabilityPercent"));
         probability.setMin(0);
         probability.setMax(100);
         probability.setValue(10);
 
-        DatePicker closeDate = new DatePicker("Close Date");
+        DatePicker closeDate = new DatePicker(i18n.translate("common.closeDate"));
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> account = new ComboBox<>("Account");
+        ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
         account.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contact = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contact = new ComboBox<>(i18n.translate("common.contact"));
         contact.setItems(contacts);
         contact.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contact.setClearButtonVisible(true);
 
-        TextArea notes = new TextArea("Notes");
+        TextArea notes = new TextArea(i18n.translate("common.notes"));
         notes.setMinHeight("80px");
 
         if (existing != null) {
@@ -214,10 +227,10 @@ public class OpportunitiesView extends VerticalLayout {
         form.setColspan(notes, 2);
         dialog.add(form);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("common.save"), e -> {
             if (name.getValue().isBlank()) {
                 name.setInvalid(true);
-                name.setErrorMessage("Name is required");
+                name.setErrorMessage(i18n.translate("view.opportunities.validation.nameRequired"));
                 return;
             }
             BigDecimal amt = amount.getValue() != null ? BigDecimal.valueOf(amount.getValue()) : null;
@@ -233,35 +246,35 @@ public class OpportunitiesView extends VerticalLayout {
                 else opportunityService.update(existing.id(), req);
                 refreshGrid();
                 dialog.close();
-                notify("Opportunity saved", false);
+                notify(i18n.translate("view.opportunities.notification.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button cancel = new Button("Cancel", e -> dialog.close());
+        Button cancel = new Button(i18n.translate("common.cancel"), e -> dialog.close());
         dialog.getFooter().add(cancel, save);
         dialog.open();
     }
 
     private void confirmDelete(OpportunityResponse opp) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Opportunity");
-        confirm.setText("Delete \"" + opp.name() + "\"?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.opportunities.deleteOpportunity"));
+        confirm.setText(i18n.translate("dialog.deleteConfirm", opp.name()));
+        confirm.setConfirmText(i18n.translate("common.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             opportunityService.delete(opp.id());
             refreshGrid();
-            notify("Opportunity deleted", false);
+            notify(i18n.translate("view.opportunities.notification.deleted"), false);
         });
         confirm.open();
     }
 
     private Span stageBadge(OpportunityStage stage) {
         if (stage == null) return new Span();
-        Span badge = new Span(stage.name());
+        Span badge = new Span(i18n.translateEnum(stage));
         String theme = switch (stage) {
             case WON -> "badge success";
             case LOST -> "badge error";
@@ -272,7 +285,7 @@ public class OpportunitiesView extends VerticalLayout {
         return badge;
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

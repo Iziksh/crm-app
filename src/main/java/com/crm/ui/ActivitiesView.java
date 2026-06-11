@@ -13,6 +13,7 @@ import com.crm.service.AccountService;
 import com.crm.service.ActivityService;
 import com.crm.service.AttachmentService;
 import com.crm.service.ContactService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -35,7 +36,7 @@ import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
@@ -43,10 +44,10 @@ import org.springframework.data.domain.PageRequest;
 import java.util.List;
 
 @Route(value = "activities", layout = MainLayout.class)
-@PageTitle("Activities | CRM")
 @RolesAllowed({"SUPPORT", "ADMIN"})
-public class ActivitiesView extends VerticalLayout {
+public class ActivitiesView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final ActivityService activityService;
     private final AccountService accountService;
     private final ContactService contactService;
@@ -55,16 +56,17 @@ public class ActivitiesView extends VerticalLayout {
 
     private final Grid<ActivityResponse> grid = new Grid<>(ActivityResponse.class, false);
     private final TextField searchField = new TextField();
-    private final ComboBox<ActivityType> typeFilter = new ComboBox<>("Type");
-    private final ComboBox<ActivityStatus> statusFilter = new ComboBox<>("Status");
+    private final ComboBox<ActivityType> typeFilter = new ComboBox<>();
+    private final ComboBox<ActivityStatus> statusFilter = new ComboBox<>();
     private final VerticalLayout notesPanel = new VerticalLayout();
     private ActivityResponse selectedActivity = null;
 
-    public ActivitiesView(ActivityService activityService,
+    public ActivitiesView(TranslationService i18n, ActivityService activityService,
                           AccountService accountService,
                           ContactService contactService,
                           SecurityService securityService,
                           AttachmentService attachmentService) {
+        this.i18n = i18n;
         this.activityService = activityService;
         this.accountService = accountService;
         this.contactService = contactService;
@@ -73,10 +75,13 @@ public class ActivitiesView extends VerticalLayout {
         setSizeFull();
         setPadding(true);
 
+        typeFilter.setLabel(i18n.translate("common.column.type"));
+        statusFilter.setLabel(i18n.translate("common.column.status"));
+
         configureGrid();
         configureNotesPanel();
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Activities"), toolbar, grid, notesPanel);
+        add(new H2(i18n.translate("view.activities.title")), toolbar, grid, notesPanel);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -91,15 +96,20 @@ public class ActivitiesView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("pageTitle.activities");
+    }
+
     private void configureGrid() {
         grid.setHeight("380px");
-        grid.addColumn(ActivityResponse::title).setHeader("Title").setSortable(true).setFlexGrow(2);
-        grid.addComponentColumn(a -> typeBadge(a.type())).setHeader("Type").setFlexGrow(0).setWidth("110px");
-        grid.addComponentColumn(a -> statusBadge(a.status())).setHeader("Status").setFlexGrow(0).setWidth("120px");
-        grid.addComponentColumn(a -> priorityBadge(a.priority())).setHeader("Priority").setFlexGrow(0).setWidth("100px");
-        grid.addColumn(ActivityResponse::assignedToName).setHeader("Assigned To").setSortable(true);
-        grid.addColumn(ActivityResponse::accountName).setHeader("Account");
-        grid.addColumn(a -> a.dueDate() != null ? a.dueDate().toString() : "").setHeader("Due Date").setSortable(true);
+        grid.addColumn(ActivityResponse::title).setHeader(i18n.translate("view.activities.column.title")).setSortable(true).setFlexGrow(2);
+        grid.addComponentColumn(a -> typeBadge(a.type())).setHeader(i18n.translate("common.column.type")).setFlexGrow(0).setWidth("110px");
+        grid.addComponentColumn(a -> statusBadge(a.status())).setHeader(i18n.translate("common.column.status")).setFlexGrow(0).setWidth("120px");
+        grid.addComponentColumn(a -> priorityBadge(a.priority())).setHeader(i18n.translate("view.activities.column.priority")).setFlexGrow(0).setWidth("100px");
+        grid.addColumn(ActivityResponse::assignedToName).setHeader(i18n.translate("view.activities.column.assignedTo")).setSortable(true);
+        grid.addColumn(ActivityResponse::accountName).setHeader(i18n.translate("common.column.account"));
+        grid.addColumn(a -> a.dueDate() != null ? a.dueDate().toString() : "").setHeader(i18n.translate("view.activities.column.dueDate")).setSortable(true);
         grid.addComponentColumn(activity -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
@@ -112,10 +122,10 @@ public class ActivitiesView extends VerticalLayout {
                         selectedActivity = activityService.findById(activity.id());
                         refreshNotesPanel();
                     }
-                    notify("Activity assigned and set to In Progress", false);
+                    notify(i18n.translate("notification.activity.assigned"), false);
                 });
                 assign.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
-                assign.getElement().setAttribute("title", "Assign to me / Set In Progress");
+                assign.getElement().setAttribute("title", i18n.translate("view.activities.tooltip.assign"));
                 actions.add(assign);
             }
 
@@ -124,10 +134,10 @@ public class ActivitiesView extends VerticalLayout {
                     activityService.resolve(activity.id());
                     refreshGrid();
                     refreshNotesPanelIfSelected(activity.id());
-                    notify("Activity resolved", false);
+                    notify(i18n.translate("notification.activity.resolved"), false);
                 });
                 resolve.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SUCCESS);
-                resolve.getElement().setAttribute("title", "Resolve");
+                resolve.getElement().setAttribute("title", i18n.translate("view.activities.tooltip.resolve"));
                 actions.add(resolve);
             }
 
@@ -136,10 +146,10 @@ public class ActivitiesView extends VerticalLayout {
                     activityService.reopen(activity.id());
                     refreshGrid();
                     refreshNotesPanelIfSelected(activity.id());
-                    notify("Activity reopened", false);
+                    notify(i18n.translate("notification.activity.reopened"), false);
                 });
                 reopen.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
-                reopen.getElement().setAttribute("title", "Reopen");
+                reopen.getElement().setAttribute("title", i18n.translate("view.activities.tooltip.reopen"));
                 actions.add(reopen);
             }
 
@@ -148,7 +158,7 @@ public class ActivitiesView extends VerticalLayout {
                 refreshNotesPanel();
             });
             notes.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
-            notes.getElement().setAttribute("title", "Notes");
+            notes.getElement().setAttribute("title", i18n.translate("view.activities.tooltip.notes"));
 
             Button edit = new Button(VaadinIcon.EDIT.create(), e -> openDialog(activity));
             edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
@@ -158,7 +168,7 @@ public class ActivitiesView extends VerticalLayout {
 
             actions.add(notes, edit, delete);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("220px");
+        }).setHeader(i18n.translate("common.column.actions")).setFlexGrow(0).setWidth("220px");
     }
 
     private void configureNotesPanel() {
@@ -183,7 +193,7 @@ public class ActivitiesView extends VerticalLayout {
         notesPanel.setVisible(true);
 
         HorizontalLayout header = new HorizontalLayout(
-                new H4("Notes — " + selectedActivity.title()),
+                new H4(i18n.translate("view.activities.notes.title", selectedActivity.title())),
                 new Button(VaadinIcon.CLOSE.create(), e -> {
                     selectedActivity = null;
                     notesPanel.setVisible(false);
@@ -195,7 +205,7 @@ public class ActivitiesView extends VerticalLayout {
 
         List<ActivityNoteResponse> notes = selectedActivity.notes();
         if (notes.isEmpty()) {
-            notesPanel.add(new Span("No notes yet."));
+            notesPanel.add(new Span(i18n.translate("view.activities.notes.empty")));
         } else {
             for (ActivityNoteResponse note : notes) {
                 Div card = new Div();
@@ -216,10 +226,10 @@ public class ActivitiesView extends VerticalLayout {
 
         notesPanel.add(new Hr());
         TextArea noteText = new TextArea();
-        noteText.setPlaceholder("Add a note…");
+        noteText.setPlaceholder(i18n.translate("view.activities.notes.placeholder"));
         noteText.setWidthFull();
         noteText.setMinHeight("70px");
-        Button addNote = new Button("Add Note", VaadinIcon.COMMENT.create(), e -> {
+        Button addNote = new Button(i18n.translate("view.activities.button.addNote"), VaadinIcon.COMMENT.create(), e -> {
             if (noteText.getValue().isBlank()) return;
             activityService.addNote(selectedActivity.id(),
                     new ActivityNoteRequest(noteText.getValue()),
@@ -233,27 +243,29 @@ public class ActivitiesView extends VerticalLayout {
 
     private HorizontalLayout buildToolbar() {
         typeFilter.setItems(ActivityType.values());
-        typeFilter.setPlaceholder("All Types");
+        typeFilter.setItemLabelGenerator(i18n::translateEnum);
+        typeFilter.setPlaceholder(i18n.translate("view.activities.filter.allTypes"));
         typeFilter.setClearButtonVisible(true);
         typeFilter.setWidth("150px");
         typeFilter.addValueChangeListener(e -> refreshGrid());
 
         statusFilter.setItems(ActivityStatus.values());
-        statusFilter.setPlaceholder("All Statuses");
+        statusFilter.setItemLabelGenerator(i18n::translateEnum);
+        statusFilter.setPlaceholder(i18n.translate("view.activities.filter.allStatuses"));
         statusFilter.setClearButtonVisible(true);
         statusFilter.setWidth("150px");
         statusFilter.addValueChangeListener(e -> refreshGrid());
 
-        searchField.setPlaceholder("Search title…");
+        searchField.setPlaceholder(i18n.translate("view.activities.search.placeholder"));
         searchField.setPrefixComponent(VaadinIcon.SEARCH.create());
         searchField.setClearButtonVisible(true);
         searchField.setValueChangeMode(ValueChangeMode.LAZY);
         searchField.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("New Activity", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.activities.button.new"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        Button exportBtn = new Button(i18n.translate("common.button.exportCsv"), VaadinIcon.DOWNLOAD.create());
         exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         exportBtn.addClickListener(e -> {
             com.vaadin.flow.server.StreamResource resource = new com.vaadin.flow.server.StreamResource("activities.csv", () -> {
@@ -286,34 +298,39 @@ public class ActivitiesView extends VerticalLayout {
 
     private void openDialog(ActivityResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Activity" : "Edit Activity");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.activities.dialog.new")
+                : i18n.translate("view.activities.dialog.edit"));
         dialog.setWidth("560px");
 
-        TextField title = new TextField("Title");
-        TextArea description = new TextArea("Description");
+        TextField title = new TextField(i18n.translate("view.activities.column.title"));
+        TextArea description = new TextArea(i18n.translate("view.activities.field.description"));
         description.setMinHeight("80px");
 
-        ComboBox<ActivityType> type = new ComboBox<>("Type");
+        ComboBox<ActivityType> type = new ComboBox<>(i18n.translate("common.column.type"));
         type.setItems(ActivityType.values());
+        type.setItemLabelGenerator(i18n::translateEnum);
 
-        ComboBox<ActivityStatus> status = new ComboBox<>("Status");
+        ComboBox<ActivityStatus> status = new ComboBox<>(i18n.translate("common.column.status"));
         status.setItems(ActivityStatus.values());
+        status.setItemLabelGenerator(i18n::translateEnum);
         status.setValue(ActivityStatus.OPEN);
 
-        ComboBox<ActivityPriority> priority = new ComboBox<>("Priority");
+        ComboBox<ActivityPriority> priority = new ComboBox<>(i18n.translate("view.activities.column.priority"));
         priority.setItems(ActivityPriority.values());
+        priority.setItemLabelGenerator(i18n::translateEnum);
         priority.setValue(ActivityPriority.MEDIUM);
 
-        DatePicker dueDate = new DatePicker("Due Date");
+        DatePicker dueDate = new DatePicker(i18n.translate("view.activities.column.dueDate"));
 
         List<AccountResponse> accounts = accountService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<AccountResponse> account = new ComboBox<>("Account");
+        ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.column.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
         account.setClearButtonVisible(true);
 
         List<ContactResponse> contacts = contactService.findAll(PageRequest.of(0, 500)).getContent();
-        ComboBox<ContactResponse> contact = new ComboBox<>("Contact");
+        ComboBox<ContactResponse> contact = new ComboBox<>(i18n.translate("common.column.contact"));
         contact.setItems(contacts);
         contact.setItemLabelGenerator(c -> c.firstName() + " " + c.lastName());
         contact.setClearButtonVisible(true);
@@ -336,17 +353,17 @@ public class ActivitiesView extends VerticalLayout {
         form.setColspan(title, 2);
         form.setColspan(description, 2);
 
-        AttachmentPanel attachments = new AttachmentPanel(attachmentService, "ACTIVITY",
+        AttachmentPanel attachments = new AttachmentPanel(i18n, attachmentService, "ACTIVITY",
                 existing != null ? existing.id() : null, securityService.getUsername());
 
         VerticalLayout body = new VerticalLayout(form, attachments);
         body.setPadding(false);
         dialog.add(body);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("dialog.save"), e -> {
             if (title.getValue().isBlank()) {
                 title.setInvalid(true);
-                title.setErrorMessage("Title is required");
+                title.setErrorMessage(i18n.translate("view.activities.validation.titleRequired"));
                 return;
             }
             ActivityRequest req = new ActivityRequest(
@@ -362,22 +379,22 @@ public class ActivitiesView extends VerticalLayout {
                 attachments.setEntityId(saved.id());
                 refreshGrid();
                 dialog.close();
-                notify("Activity saved", false);
+                notify(i18n.translate("notification.activity.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button cancel = new Button("Cancel", e -> dialog.close());
+        Button cancel = new Button(i18n.translate("dialog.cancel"), e -> dialog.close());
         dialog.getFooter().add(cancel, save);
         dialog.open();
     }
 
     private void confirmDelete(ActivityResponse activity) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Activity");
-        confirm.setText("Delete \"" + activity.title() + "\"?");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.activities.delete.header"));
+        confirm.setText(i18n.translate("view.activities.delete.text", activity.title()));
+        confirm.setConfirmText(i18n.translate("dialog.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
@@ -387,14 +404,14 @@ public class ActivitiesView extends VerticalLayout {
                 notesPanel.setVisible(false);
             }
             refreshGrid();
-            notify("Activity deleted", false);
+            notify(i18n.translate("notification.activity.deleted"), false);
         });
         confirm.open();
     }
 
     private Span typeBadge(ActivityType type) {
         if (type == null) return new Span();
-        Span badge = new Span(type.name().replace('_', ' '));
+        Span badge = new Span(i18n.translateEnum(type));
         String theme = switch (type) {
             case BUG -> "badge error";
             case FEATURE -> "badge success";
@@ -410,7 +427,7 @@ public class ActivitiesView extends VerticalLayout {
 
     private Span statusBadge(ActivityStatus status) {
         if (status == null) return new Span();
-        Span badge = new Span(status.name().replace('_', ' '));
+        Span badge = new Span(i18n.translateEnum(status));
         String theme = switch (status) {
             case OPEN -> "badge primary";
             case IN_PROGRESS -> "badge";
@@ -423,7 +440,7 @@ public class ActivitiesView extends VerticalLayout {
 
     private Span priorityBadge(ActivityPriority priority) {
         if (priority == null) return new Span();
-        Span badge = new Span(priority.name());
+        Span badge = new Span(i18n.translateEnum(priority));
         String theme = switch (priority) {
             case CRITICAL -> "badge error";
             case HIGH -> "badge error small";
@@ -434,7 +451,7 @@ public class ActivitiesView extends VerticalLayout {
         return badge;
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

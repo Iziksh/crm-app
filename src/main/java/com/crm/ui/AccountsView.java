@@ -7,6 +7,7 @@ import com.crm.dto.response.ImportResultResponse;
 import com.crm.service.AccountService;
 import com.crm.service.AttachmentService;
 import com.crm.service.ImportService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
@@ -28,17 +29,17 @@ import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.component.upload.receivers.MemoryBuffer;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.StreamResource;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.data.domain.PageRequest;
 
 @Route(value = "accounts", layout = MainLayout.class)
-@PageTitle("Accounts | CRM")
 @PermitAll
-public class AccountsView extends VerticalLayout {
+public class AccountsView extends VerticalLayout implements HasDynamicTitle {
 
+    private final TranslationService i18n;
     private final AccountService accountService;
     private final ImportService importService;
     private final AttachmentService attachmentService;
@@ -46,8 +47,9 @@ public class AccountsView extends VerticalLayout {
     private final Grid<AccountResponse> grid = new Grid<>(AccountResponse.class, false);
     private final TextField searchField = new TextField();
 
-    public AccountsView(AccountService accountService, ImportService importService,
+    public AccountsView(TranslationService i18n, AccountService accountService, ImportService importService,
                         AttachmentService attachmentService, SecurityService securityService) {
+        this.i18n = i18n;
         this.accountService = accountService;
         this.importService = importService;
         this.attachmentService = attachmentService;
@@ -58,7 +60,7 @@ public class AccountsView extends VerticalLayout {
         configureGrid();
 
         HorizontalLayout toolbar = buildToolbar();
-        add(new H2("Accounts"), toolbar, grid);
+        add(new H2(i18n.translate("view.accounts.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
         grid.setItems(DataProvider.fromCallbacks(
@@ -71,13 +73,18 @@ public class AccountsView extends VerticalLayout {
         ));
     }
 
+    @Override
+    public String getPageTitle() {
+        return i18n.translate("pageTitle.accounts");
+    }
+
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(AccountResponse::name).setHeader("Name").setSortable(true).setFlexGrow(2);
-        grid.addColumn(AccountResponse::industry).setHeader("Industry").setSortable(true);
-        grid.addColumn(AccountResponse::type).setHeader("Type").setSortable(true);
-        grid.addColumn(AccountResponse::email).setHeader("Email");
-        grid.addColumn(AccountResponse::phone).setHeader("Phone");
+        grid.addColumn(AccountResponse::name).setHeader(i18n.translate("common.column.name")).setSortable(true).setFlexGrow(2);
+        grid.addColumn(AccountResponse::industry).setHeader(i18n.translate("view.accounts.column.industry")).setSortable(true);
+        grid.addColumn(a -> i18n.translateEnum(a.type())).setHeader(i18n.translate("common.column.type")).setSortable(true);
+        grid.addColumn(AccountResponse::email).setHeader(i18n.translate("common.column.email"));
+        grid.addColumn(AccountResponse::phone).setHeader(i18n.translate("common.column.phone"));
         grid.addComponentColumn(account -> {
             Button edit = new Button(VaadinIcon.EDIT.create(), e -> openDialog(account));
             edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
@@ -86,20 +93,20 @@ public class AccountsView extends VerticalLayout {
             HorizontalLayout actions = new HorizontalLayout(edit, delete);
             actions.setSpacing(false);
             return actions;
-        }).setHeader("Actions").setFlexGrow(0).setWidth("120px");
+        }).setHeader(i18n.translate("common.column.actions")).setFlexGrow(0).setWidth("120px");
     }
 
     private HorizontalLayout buildToolbar() {
-        searchField.setPlaceholder("Search by name…");
+        searchField.setPlaceholder(i18n.translate("view.accounts.search.placeholder"));
         searchField.setPrefixComponent(VaadinIcon.SEARCH.create());
         searchField.setClearButtonVisible(true);
         searchField.setValueChangeMode(ValueChangeMode.LAZY);
         searchField.addValueChangeListener(e -> refreshGrid());
 
-        Button addBtn = new Button("Add Account", VaadinIcon.PLUS.create(), e -> openDialog(null));
+        Button addBtn = new Button(i18n.translate("view.accounts.button.add"), VaadinIcon.PLUS.create(), e -> openDialog(null));
         addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        Button exportBtn = new Button("Export CSV", VaadinIcon.DOWNLOAD.create());
+        Button exportBtn = new Button(i18n.translate("common.button.exportCsv"), VaadinIcon.DOWNLOAD.create());
         exportBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         exportBtn.addClickListener(e -> {
             StreamResource resource = new StreamResource("accounts.csv", () -> {
@@ -121,7 +128,7 @@ public class AccountsView extends VerticalLayout {
             anchor.getElement().executeJs("this.click(); setTimeout(() => this.remove(), 1000)");
         });
 
-        Button importBtn = new Button("Import CSV", VaadinIcon.UPLOAD.create());
+        Button importBtn = new Button(i18n.translate("common.button.importCsv"), VaadinIcon.UPLOAD.create());
         importBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         importBtn.addClickListener(e -> openImportDialog());
 
@@ -134,10 +141,10 @@ public class AccountsView extends VerticalLayout {
 
     private void openImportDialog() {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle("Import Accounts from CSV");
+        dialog.setHeaderTitle(i18n.translate("view.accounts.import.title"));
         dialog.setWidth("480px");
 
-        Span hint = new Span("CSV columns: name, industry, website, phone, email, type");
+        Span hint = new Span(i18n.translate("view.accounts.import.hint"));
         hint.getStyle().set("font-size", "0.85em").set("color", "var(--lumo-secondary-text-color)");
 
         MemoryBuffer buffer = new MemoryBuffer();
@@ -152,20 +159,21 @@ public class AccountsView extends VerticalLayout {
             try {
                 ImportResultResponse result = importService.importAccounts(buffer.getInputStream());
                 resultArea.removeAll();
-                resultArea.add(new Span("✓ Imported: " + result.imported() +
-                        "  ·  Skipped: " + result.skipped()));
+                resultArea.add(new Span(i18n.translate("view.accounts.import.result",
+                        result.imported(), result.skipped())));
                 if (!result.errors().isEmpty()) {
-                    result.errors().stream().limit(5).forEach(err -> resultArea.add(new Span("⚠ " + err)));
+                    result.errors().stream().limit(5).forEach(err ->
+                            resultArea.add(new Span(i18n.translate("common.import.errorLine", err))));
                 }
                 refreshGrid();
             } catch (Exception ex) {
                 resultArea.removeAll();
-                resultArea.add(new Span("Error: " + ex.getMessage()));
+                resultArea.add(new Span(i18n.translate("view.accounts.import.error", ex.getMessage())));
             }
         });
 
         dialog.add(hint, upload, resultArea);
-        dialog.getFooter().add(new Button("Close", e2 -> dialog.close()));
+        dialog.getFooter().add(new Button(i18n.translate("dialog.close"), e2 -> dialog.close()));
         dialog.open();
     }
 
@@ -175,18 +183,21 @@ public class AccountsView extends VerticalLayout {
 
     private void openDialog(AccountResponse existing) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null ? "New Account" : "Edit Account");
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.accounts.dialog.new")
+                : i18n.translate("view.accounts.dialog.edit"));
         dialog.setWidth("480px");
 
-        TextField name = new TextField("Name");
-        TextField industry = new TextField("Industry");
-        TextField website = new TextField("Website");
-        TextField phone = new TextField("Phone");
-        EmailField email = new EmailField("Email");
-        TextField address = new TextField("Address");
-        ComboBox<AccountType> type = new ComboBox<>("Type");
+        TextField name = new TextField(i18n.translate("common.column.name"));
+        TextField industry = new TextField(i18n.translate("view.accounts.column.industry"));
+        TextField website = new TextField(i18n.translate("view.accounts.field.website"));
+        TextField phone = new TextField(i18n.translate("common.column.phone"));
+        EmailField email = new EmailField(i18n.translate("common.column.email"));
+        TextField address = new TextField(i18n.translate("view.accounts.field.address"));
+        ComboBox<AccountType> type = new ComboBox<>(i18n.translate("common.column.type"));
         type.setItems(AccountType.values());
-        TextField notes = new TextField("Notes");
+        type.setItemLabelGenerator(i18n::translateEnum);
+        TextField notes = new TextField(i18n.translate("common.column.notes"));
 
         if (existing != null) {
             name.setValue(nvl(existing.name()));
@@ -204,17 +215,17 @@ public class AccountsView extends VerticalLayout {
         form.setColspan(address, 2);
         form.setColspan(notes, 2);
 
-        AttachmentPanel attachments = new AttachmentPanel(attachmentService, "ACCOUNT",
+        AttachmentPanel attachments = new AttachmentPanel(i18n, attachmentService, "ACCOUNT",
                 existing != null ? existing.id() : null, securityService.getUsername());
 
         VerticalLayout body = new VerticalLayout(form, attachments);
         body.setPadding(false);
         dialog.add(body);
 
-        Button save = new Button("Save", e -> {
+        Button save = new Button(i18n.translate("dialog.save"), e -> {
             if (name.getValue().isBlank()) {
                 name.setInvalid(true);
-                name.setErrorMessage("Name is required");
+                name.setErrorMessage(i18n.translate("common.validation.nameRequired"));
                 return;
             }
             AccountRequest req = new AccountRequest(
@@ -228,33 +239,33 @@ public class AccountsView extends VerticalLayout {
                 attachments.setEntityId(saved.id());
                 refreshGrid();
                 dialog.close();
-                notify("Account saved", false);
+                notify(i18n.translate("notification.account.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        Button cancel = new Button("Cancel", e -> dialog.close());
+        Button cancel = new Button(i18n.translate("dialog.cancel"), e -> dialog.close());
         dialog.getFooter().add(cancel, save);
         dialog.open();
     }
 
     private void confirmDelete(AccountResponse account) {
         ConfirmDialog confirm = new ConfirmDialog();
-        confirm.setHeader("Delete Account");
-        confirm.setText("Delete \"" + account.name() + "\"? This also removes all linked contacts.");
-        confirm.setConfirmText("Delete");
+        confirm.setHeader(i18n.translate("view.accounts.delete.header"));
+        confirm.setText(i18n.translate("view.accounts.delete.text", account.name()));
+        confirm.setConfirmText(i18n.translate("dialog.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             accountService.delete(account.id());
             refreshGrid();
-            notify("Account deleted", false);
+            notify(i18n.translate("notification.account.deleted"), false);
         });
         confirm.open();
     }
 
-    private static void notify(String msg, boolean error) {
+    private void notify(String msg, boolean error) {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }

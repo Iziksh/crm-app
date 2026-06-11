@@ -2,6 +2,7 @@ package com.crm.ui;
 
 import com.crm.dto.response.AttachmentResponse;
 import com.crm.service.AttachmentService;
+import com.crm.service.TranslationService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.details.Details;
@@ -23,15 +24,17 @@ import java.util.List;
 /** Reusable collapsible attachment panel for entity edit dialogs. */
 public class AttachmentPanel extends Details {
 
+    private final TranslationService i18n;
     private final AttachmentService attachmentService;
     private final String entityType;
     private Long entityId;
     private final String currentUsername;
     private final VerticalLayout listArea = new VerticalLayout();
 
-    public AttachmentPanel(AttachmentService attachmentService, String entityType,
+    public AttachmentPanel(TranslationService i18n, AttachmentService attachmentService, String entityType,
                            Long entityId, String currentUsername) {
-        super("Attachments");
+        super(i18n.translate("attachment.title"));
+        this.i18n = i18n;
         this.attachmentService = attachmentService;
         this.entityType = entityType;
         this.entityId = entityId;
@@ -47,9 +50,7 @@ public class AttachmentPanel extends Details {
 
         upload.addSucceededListener(event -> {
             if (entityId == null) {
-                Notification.show("Save the record first before attaching files.",
-                        3000, Notification.Position.BOTTOM_CENTER)
-                        .addThemeVariants(NotificationVariant.LUMO_WARNING);
+                notify(i18n.translate("attachment.saveFirst.upload"), NotificationVariant.LUMO_WARNING);
                 return;
             }
             try {
@@ -59,9 +60,7 @@ public class AttachmentPanel extends Details {
                 attachmentService.uploadBytes(filename, mimeType, bytes, entityType, entityId, currentUsername);
                 refresh();
             } catch (Exception ex) {
-                Notification.show("Upload failed: " + ex.getMessage(),
-                        3000, Notification.Position.BOTTOM_CENTER)
-                        .addThemeVariants(NotificationVariant.LUMO_ERROR);
+                notify(i18n.translate("attachment.upload.failed", ex.getMessage()), NotificationVariant.LUMO_ERROR);
             }
         });
 
@@ -81,12 +80,12 @@ public class AttachmentPanel extends Details {
     public void refresh() {
         listArea.removeAll();
         if (entityId == null) {
-            listArea.add(new Span("Save the record first to enable attachments."));
+            listArea.add(new Span(i18n.translate("attachment.saveFirst.enable")));
             return;
         }
         List<AttachmentResponse> attachments = attachmentService.findByEntity(entityType, entityId);
         if (attachments.isEmpty()) {
-            listArea.add(new Span("No attachments."));
+            listArea.add(new Span(i18n.translate("attachment.empty")));
             return;
         }
         for (AttachmentResponse att : attachments) {
@@ -97,9 +96,10 @@ public class AttachmentPanel extends Details {
             Div info = new Div();
             info.getStyle().set("flex", "1");
             Span name = new Span(att.filename());
-            Span meta = new Span(" (" + formatSize(att.fileSize()) + ") — " +
-                    (att.uploadedByName() != null ? att.uploadedByName() : "") + " " +
-                    (att.createdAt() != null ? att.createdAt().toLocalDate().toString() : ""));
+            Span meta = new Span(i18n.translate("attachment.meta",
+                    formatSize(att.fileSize()),
+                    att.uploadedByName() != null ? att.uploadedByName() : "",
+                    att.createdAt() != null ? att.createdAt().toLocalDate().toString() : ""));
             meta.getStyle().set("font-size", "0.8em").set("color", "var(--lumo-secondary-text-color)");
             info.add(name, meta);
 
@@ -128,9 +128,14 @@ public class AttachmentPanel extends Details {
         }
     }
 
-    private static String formatSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return (bytes / 1024) + " KB";
-        return String.format("%.1f MB", bytes / (1024.0 * 1024));
+    private String formatSize(long bytes) {
+        if (bytes < 1024) return i18n.translate("attachment.size.bytes", bytes);
+        if (bytes < 1024 * 1024) return i18n.translate("attachment.size.kb", bytes / 1024);
+        return i18n.translate("attachment.size.mb", bytes / (1024.0 * 1024));
+    }
+
+    private void notify(String msg, NotificationVariant variant) {
+        Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER)
+                .addThemeVariants(variant);
     }
 }
