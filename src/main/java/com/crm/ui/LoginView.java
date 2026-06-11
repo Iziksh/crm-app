@@ -154,7 +154,7 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver, Ha
 
         // No trusted device — send OTP and proceed to verification
         String otp = otpService.generateAndStore(email);
-        emailService.sendOtp(email, otp);
+        emailService.sendOtp(email, otp, localeService.getCurrentLocale());
 
         VaadinSession.getCurrent().setAttribute("2fa_username", userDetails.getUsername());
         VaadinSession.getCurrent().setAttribute("2fa_email", email);

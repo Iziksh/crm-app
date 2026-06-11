@@ -180,6 +180,7 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
         SecurityContextHolder.setContext(context);
         VaadinSession.getCurrent().getSession().setAttribute(
                 HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+        localeService.persistLocaleForAuthenticatedUser(localeService.getCurrentLocale());
 
         VaadinSession.getCurrent().setAttribute("2fa_username", null);
         VaadinSession.getCurrent().setAttribute("2fa_email", null);
@@ -190,7 +191,7 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
     private void handleResend() {
         if (pendingEmail != null) {
             String newOtp = otpService.generateAndStore(pendingEmail);
-            emailService.sendOtp(pendingEmail, newOtp);
+            emailService.sendOtp(pendingEmail, newOtp, localeService.getCurrentLocale());
             errorMsg.setText(i18n.translate("auth.newCodeSent"));
             errorMsg.getStyle().set("color", "#2e7d32");
             errorMsg.setVisible(true);

@@ -38,6 +38,7 @@ public class ActivityService {
     private final NotificationService notificationService;
     private final CrmEventPublisher eventPublisher;
     private final EmailService emailService;
+    private final EmailLocaleResolver emailLocaleResolver;
 
     public ActivityService(ActivityRepository activityRepository,
                            ActivityNoteRepository noteRepository,
@@ -46,7 +47,8 @@ public class ActivityService {
                            ContactRepository contactRepository,
                            NotificationService notificationService,
                            CrmEventPublisher eventPublisher,
-                           EmailService emailService) {
+                           EmailService emailService,
+                           EmailLocaleResolver emailLocaleResolver) {
         this.activityRepository = activityRepository;
         this.noteRepository = noteRepository;
         this.userRepository = userRepository;
@@ -55,6 +57,7 @@ public class ActivityService {
         this.notificationService = notificationService;
         this.eventPublisher = eventPublisher;
         this.emailService = emailService;
+        this.emailLocaleResolver = emailLocaleResolver;
     }
 
     public ActivityResponse create(ActivityRequest request, String createdByUsername) {
@@ -65,7 +68,10 @@ public class ActivityService {
             notificationService.notify(saved.getAssignedTo().getId(),
                     "New activity assigned: " + saved.getTitle(), "ACTIVITY", saved.getId());
             if (saved.getAssignedTo().getEmail() != null) {
-                emailService.sendActivityAssigned(saved.getAssignedTo().getEmail(), saved.getTitle());
+                emailService.sendActivityAssigned(
+                        saved.getAssignedTo().getEmail(),
+                        saved.getTitle(),
+                        emailLocaleResolver.resolveForUser(saved.getAssignedTo()));
             }
         }
         // Phase 18: if EMAIL type, send actual email to the linked contact

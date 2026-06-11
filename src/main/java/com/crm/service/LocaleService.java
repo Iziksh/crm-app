@@ -1,6 +1,7 @@
 package com.crm.service;
 
 import com.crm.i18n.SupportedLocale;
+import com.crm.repository.UserRepository;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.server.VaadinRequest;
 import com.vaadin.flow.server.VaadinResponse;
@@ -11,6 +12,8 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
@@ -21,6 +24,12 @@ import java.util.Optional;
 public class LocaleService {
 
     private static final int COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
+
+    private final UserRepository userRepository;
+
+    public LocaleService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     public Locale resolve(HttpServletRequest request) {
         Optional<Locale> fromCookie = readCookie(request, SupportedLocale.COOKIE_NAME)
@@ -52,6 +61,7 @@ public class LocaleService {
         Locale normalized = SupportedLocale.isSupported(locale) ? locale : SupportedLocale.DEFAULT;
         storeLocale(normalized);
         writeCookie(normalized);
+        persistLocaleForAuthenticatedUser(normalized);
         ui.setLocale(normalized);
         applyDirection(ui, normalized);
     }
@@ -104,6 +114,18 @@ public class LocaleService {
         cookie.setMaxAge(COOKIE_MAX_AGE_SECONDS);
         cookie.setHttpOnly(false);
         response.addCookie(cookie);
+    }
+
+    public void persistLocaleForAuthenticatedUser(Locale locale) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            return;
+        }
+        String username = auth.getName();
+        userRepository.findByUsername(username).ifPresent(user -> {
+            user.setLocale(SupportedLocale.toCode(locale));
+            userRepository.save(user);
+        });
     }
 
     private void storeLocale(Locale locale) {
