@@ -10,11 +10,11 @@ import java.time.OffsetDateTime;
     name = "holidays",
     uniqueConstraints = @UniqueConstraint(
         name = "uq_holiday_date_name",
-        columnNames = {"date", "name", "country"}
+        columnNames = {"holiday_date", "name", "country"}
     ),
     indexes = {
-        @Index(name = "idx_holidays_year_country", columnList = "year, country"),
-        @Index(name = "idx_holidays_date",         columnList = "date")
+        @Index(name = "idx_holidays_year_country", columnList = "holiday_year, country"),
+        @Index(name = "idx_holidays_date",         columnList = "holiday_date")
     }
 )
 public class Holiday {
@@ -23,19 +23,19 @@ public class Holiday {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "date", nullable = false)
+    @Column(name = "holiday_date", nullable = false)
     private LocalDate date;
 
     @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "type", nullable = false, length = 32)
+    @Column(name = "holiday_type", nullable = false, length = 32)
     private String type = "PUBLIC";
 
     @Column(name = "country", nullable = false, length = 2)
     private String country = "IL";
 
-    @Column(name = "year", nullable = false)
+    @Column(name = "holiday_year", nullable = false)
     private Short year;
 
     @Column(name = "credit_hours", nullable = false, precision = 4, scale = 2)

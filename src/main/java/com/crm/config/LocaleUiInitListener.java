@@ -1,5 +1,6 @@
 package com.crm.config;
 
+import com.crm.config.performance.StartupPerformanceProfiler;
 import com.crm.service.LocaleService;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.server.ServiceInitEvent;
@@ -18,6 +19,7 @@ public class LocaleUiInitListener implements VaadinServiceInitListener {
     @Override
     public void serviceInit(ServiceInitEvent event) {
         event.getSource().addUIInitListener(uiEvent ->
-                localeService.resolveAndApply(uiEvent.getUI()));
+                StartupPerformanceProfiler.time("phase.authentication-locale-init",
+                        () -> localeService.resolveAndApply(uiEvent.getUI())));
     }
 }

@@ -21,6 +21,10 @@ public interface ContractRepository extends JpaRepository<Contract, Long>, JpaSp
     List<Contract> findBySalesOrder_Id(Long salesOrderId);
     List<Contract> findByAccount_Id(Long accountId);
     List<Contract> findByEndDateBefore(LocalDate date);
+    long countByEndDateBefore(LocalDate date);
+
+    @Query("SELECT c.status, COUNT(c) FROM Contract c GROUP BY c.status")
+    List<Object[]> countGroupByStatus();
 
     // A-02: Active contracts expiring within warning window
     @Query("SELECT c FROM Contract c WHERE c.status = :status AND c.endDate BETWEEN :from AND :to")
