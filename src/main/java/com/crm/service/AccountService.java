@@ -7,6 +7,7 @@ import com.crm.exception.DuplicateEmailException;
 import com.crm.exception.ResourceNotFoundException;
 import com.crm.repository.AccountRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +20,14 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final CrmEventPublisher eventPublisher;
+    private final WorkspaceContext workspaceContext;
 
-    public AccountService(AccountRepository accountRepository, CrmEventPublisher eventPublisher) {
+    public AccountService(AccountRepository accountRepository,
+                          CrmEventPublisher eventPublisher,
+                          WorkspaceContext workspaceContext) {
         this.accountRepository = accountRepository;
         this.eventPublisher = eventPublisher;
+        this.workspaceContext = workspaceContext;
     }
 
     public AccountResponse create(AccountRequest request) {
@@ -30,6 +35,7 @@ public class AccountService {
             throw new DuplicateEmailException(request.email());
         }
         Account account = mapToEntity(new Account(), request);
+        workspaceContext.currentUserPrimaryWorkspace().ifPresent(account::setWorkspace);
         AccountResponse response = AccountResponse.from(accountRepository.save(account));
         eventPublisher.publishCreated("ACCOUNT", response.id());
         return response;
@@ -42,39 +48,75 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public Page<AccountResponse> findAll(Pageable pageable) {
-        return accountRepository.findAll(pageable).map(AccountResponse::from);
+        if (workspaceContext.isAdmin()) {
+            return accountRepository.findAll(pageable).map(AccountResponse::from);
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
+        return accountRepository.findByWorkspace_IdIn(wsIds, pageable).map(AccountResponse::from);
     }
 
     @Transactional(readOnly = true)
     public Page<AccountResponse> findAll(Pageable pageable, String search) {
-        if (search != null && !search.isBlank()) {
-            return accountRepository.findByNameContainingIgnoreCase(search, pageable).map(AccountResponse::from);
+        if (workspaceContext.isAdmin()) {
+            if (search != null && !search.isBlank()) {
+                return accountRepository.findByNameContainingIgnoreCase(search, pageable).map(AccountResponse::from);
+            }
+            return accountRepository.findAll(pageable).map(AccountResponse::from);
         }
-        return accountRepository.findAll(pageable).map(AccountResponse::from);
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
+        if (search != null && !search.isBlank()) {
+            return accountRepository.searchByWorkspaceIds(search, wsIds, pageable).map(AccountResponse::from);
+        }
+        return accountRepository.findByWorkspace_IdIn(wsIds, pageable).map(AccountResponse::from);
     }
 
     @Transactional(readOnly = true)
     public long count(String search) {
-        if (search != null && !search.isBlank()) {
-            return accountRepository.countByNameContainingIgnoreCase(search);
+        if (workspaceContext.isAdmin()) {
+            if (search != null && !search.isBlank()) {
+                return accountRepository.countByNameContainingIgnoreCase(search);
+            }
+            return accountRepository.count();
         }
-        return accountRepository.count();
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return 0;
+        if (search != null && !search.isBlank()) {
+            return accountRepository.countSearchByWorkspaceIds(search, wsIds);
+        }
+        return accountRepository.countByWorkspace_IdIn(wsIds);
     }
 
     @Transactional(readOnly = true)
     public List<AccountResponse> search(String name) {
-        return accountRepository.findByNameContainingIgnoreCase(name)
+        if (workspaceContext.isAdmin()) {
+            return accountRepository.findByNameContainingIgnoreCase(name)
+                    .stream().map(AccountResponse::from).toList();
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return List.of();
+        return accountRepository.searchAllByWorkspaceIds(name, wsIds)
                 .stream().map(AccountResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
     public List<AccountResponse> findAllForExport(String search) {
+        if (workspaceContext.isAdmin()) {
+            if (search != null && !search.isBlank()) {
+                return accountRepository.findByNameContainingIgnoreCase(search,
+                        org.springframework.data.domain.Pageable.unpaged()).getContent()
+                        .stream().map(AccountResponse::from).toList();
+            }
+            return accountRepository.findAll().stream().map(AccountResponse::from).toList();
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return List.of();
         if (search != null && !search.isBlank()) {
-            return accountRepository.findByNameContainingIgnoreCase(search,
-                    org.springframework.data.domain.Pageable.unpaged()).getContent()
+            return accountRepository.searchAllByWorkspaceIds(search, wsIds)
                     .stream().map(AccountResponse::from).toList();
         }
-        return accountRepository.findAll().stream().map(AccountResponse::from).toList();
+        return accountRepository.findAllByWorkspaceIds(wsIds).stream().map(AccountResponse::from).toList();
     }
 
     public AccountResponse update(Long id, AccountRequest request) {

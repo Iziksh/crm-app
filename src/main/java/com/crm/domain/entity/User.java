@@ -1,5 +1,6 @@
 package com.crm.domain.entity;
 
+import com.crm.domain.enums.UserStatus;
 import jakarta.persistence.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -39,6 +40,14 @@ public class User implements UserDetails {
 
     private boolean enabled = true;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private UserStatus status = UserStatus.ACTIVE;
+
+    /** Primary workspace (= company) this user belongs to. Null only for legacy/super-admin accounts. */
+    @Column(name = "workspace_id")
+    private Long workspaceId;
+
     @Column(length = 5)
     private String locale;
 
@@ -59,7 +68,13 @@ public class User implements UserDetails {
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return true; }
     @Override public boolean isCredentialsNonExpired() { return true; }
-    @Override public boolean isEnabled() { return enabled; }
+
+    @Override
+    public boolean isEnabled() {
+        // status takes precedence; fall back to legacy enabled flag when status not set
+        if (status != null) return status == UserStatus.ACTIVE;
+        return enabled;
+    }
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -70,6 +85,13 @@ public class User implements UserDetails {
     public Set<String> getRoles() { return roles; }
     public void setRoles(Set<String> roles) { this.roles = roles; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public UserStatus getStatus() { return status; }
+    public void setStatus(UserStatus status) {
+        this.status = status;
+        this.enabled = (status == UserStatus.ACTIVE);
+    }
+    public Long getWorkspaceId() { return workspaceId; }
+    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
     public String getLocale() { return locale; }
     public void setLocale(String locale) { this.locale = locale; }
     public LocalDateTime getCreatedAt() { return createdAt; }

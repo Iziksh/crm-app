@@ -13,6 +13,7 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
+import com.vaadin.flow.router.RouterLink;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.PasswordField;
@@ -109,7 +110,14 @@ public class LoginView extends VerticalLayout implements BeforeEnterObserver, Ha
         passwordField.addKeyDownListener(com.vaadin.flow.component.Key.ENTER,
                 ev -> handleLogin(usernameField.getValue(), passwordField.getValue()));
 
-        card.add(langRow, title, errorMsg, usernameField, passwordField, loginBtn);
+        RouterLink registerLink = new RouterLink(
+                i18n.translate("auth.register"), RegisterView.class);
+        registerLink.getStyle()
+                .set("font-size", "13px")
+                .set("text-align", "center")
+                .set("margin-top", "4px");
+
+        card.add(langRow, title, errorMsg, usernameField, passwordField, loginBtn, registerLink);
         add(card);
     }
 

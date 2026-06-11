@@ -1,12 +1,17 @@
 package com.crm.ui;
 
-import com.crm.dto.request.UserRequest;
-import com.crm.dto.response.UserResponse;
+import com.crm.domain.entity.User;
+import com.crm.domain.enums.UserStatus;
+import com.crm.dto.request.AdminInviteRequest;
+import com.crm.exception.LastAdminException;
+import com.crm.repository.UserRepository;
+import com.crm.repository.WorkspaceRepository;
+import com.crm.service.AdminUserManagementService;
 import com.crm.service.TranslationService;
 import com.crm.service.UserService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
-import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.combobox.ComboBox;
 import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.formlayout.FormLayout;
@@ -18,119 +23,201 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.component.textfield.PasswordField;
+import com.vaadin.flow.component.textfield.EmailField;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import jakarta.annotation.security.RolesAllowed;
-import org.springframework.data.domain.PageRequest;
 
-import java.util.Set;
+import java.util.List;
 
 @Route(value = "users", layout = MainLayout.class)
-@RolesAllowed("ADMIN")
+@RolesAllowed({"ADMIN", "COMPANY_ADMIN", "SUPER_ADMIN"})
 public class UsersView extends VerticalLayout implements HasDynamicTitle {
 
     private final TranslationService i18n;
+    private final AdminUserManagementService adminService;
     private final UserService userService;
+    private final UserRepository userRepository;
+    private final WorkspaceRepository workspaceRepository;
     private final SecurityService securityService;
+    private final Grid<User> grid = new Grid<>(User.class, false);
     private final TextField searchField = new TextField();
-    private final Grid<UserResponse> grid = new Grid<>(UserResponse.class, false);
+    private User actingUser;
 
-    public UsersView(UserService userService, SecurityService securityService, TranslationService i18n) {
+    public UsersView(AdminUserManagementService adminService,
+                     UserService userService,
+                     UserRepository userRepository,
+                     WorkspaceRepository workspaceRepository,
+                     SecurityService securityService,
+                     TranslationService i18n) {
+        this.adminService = adminService;
         this.userService = userService;
+        this.userRepository = userRepository;
+        this.workspaceRepository = workspaceRepository;
         this.securityService = securityService;
         this.i18n = i18n;
         setSizeFull();
         setPadding(true);
 
-        configureGrid();
-        HorizontalLayout toolbar = buildToolbar();
-        add(new H2(i18n.translate("view.users.title")), toolbar, grid);
-        setFlexGrow(1, grid);
+        actingUser = userRepository.findByUsername(securityService.getUsername())
+                .orElseThrow(() -> new IllegalStateException("Current user not found"));
 
-        grid.setItems(DataProvider.fromCallbacks(
-            query -> {
-                int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
-                return userService.findAll(PageRequest.of(page, query.getLimit()), searchField.getValue())
-                        .getContent().stream();
-            },
-            query -> (int) userService.count(searchField.getValue())
-        ));
+        configureGrid();
+        add(new H2(i18n.translate("view.users.title")), buildToolbar(), grid);
+        setFlexGrow(1, grid);
+        refresh();
     }
 
     @Override
-    public String getPageTitle() {
-        return i18n.translate("page.users");
+    public String getPageTitle() { return i18n.translate("page.users"); }
+
+    // If workspace_id is null (account created before workspace scoping),
+    // look it up via workspace membership and persist it so future calls are fast.
+    private void resolveWorkspaceIfMissing() {
+        if (actingUser.getWorkspaceId() != null || adminService.isSuperAdmin(actingUser)) return;
+        workspaceRepository.findByMembers_Id(actingUser.getId()).stream().findFirst().ifPresent(ws -> {
+            actingUser.setWorkspaceId(ws.getId());
+            userRepository.save(actingUser);
+        });
+    }
+
+    private void refresh() {
+        resolveWorkspaceIfMissing();
+        List<User> users;
+        if (adminService.isSuperAdmin(actingUser)) {
+            users = userRepository.findAll();
+        } else if (actingUser.getWorkspaceId() == null) {
+            users = List.of();
+        } else {
+            users = adminService.listWorkspaceUsers(actingUser.getWorkspaceId(), actingUser);
+        }
+        String filter = searchField.getValue().toLowerCase();
+        if (!filter.isBlank()) {
+            users = users.stream()
+                    .filter(u -> (u.getUsername() != null && u.getUsername().toLowerCase().contains(filter))
+                            || (u.getEmail() != null && u.getEmail().toLowerCase().contains(filter)))
+                    .toList();
+        }
+        grid.setItems(users);
     }
 
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(UserResponse::username).setHeader(i18n.translate("common.username"))
-                .setSortable(true).setFlexGrow(1);
-        grid.addColumn(UserResponse::email).setHeader(i18n.translate("common.email"))
-                .setSortable(true).setFlexGrow(2);
+
+        grid.addColumn(User::getUsername)
+                .setHeader(i18n.translate("common.username")).setSortable(true).setFlexGrow(1);
+        grid.addColumn(User::getEmail)
+                .setHeader(i18n.translate("common.email")).setSortable(true).setFlexGrow(2);
+
         grid.addComponentColumn(u -> {
             HorizontalLayout badges = new HorizontalLayout();
             badges.setSpacing(true);
-            if (u.roles() != null) {
-                u.roles().forEach(role -> {
-                    String roleKey = role.replace("ROLE_", "");
-                    Span badge = new Span(i18n.translate("common.role." + roleKey));
-                    String theme = switch (role) {
-                        case "ROLE_ADMIN" -> "badge error";
+            if (u.getRoles() != null) {
+                u.getRoles().forEach(role -> {
+                    String key = role.replace("ROLE_", "");
+                    Span badge = new Span(i18n.translate("common.role." + key));
+                    badge.getElement().getThemeList().add(switch (role) {
+                        case "ROLE_ADMIN", "ROLE_SUPER_ADMIN" -> "badge error";
+                        case "ROLE_COMPANY_ADMIN" -> "badge primary";
                         case "ROLE_SALES" -> "badge success";
-                        case "ROLE_SUPPORT" -> "badge primary";
+                        case "ROLE_SUPPORT" -> "badge";
                         default -> "badge contrast";
-                    };
-                    badge.getElement().getThemeList().add(theme);
+                    });
                     badges.add(badge);
                 });
             }
             return badges;
         }).setHeader(i18n.translate("common.roles")).setFlexGrow(1);
+
         grid.addComponentColumn(u -> {
-            Span badge = new Span(u.enabled()
-                    ? i18n.translate("common.active")
-                    : i18n.translate("common.disabled"));
-            badge.getElement().getThemeList().add(u.enabled() ? "badge success" : "badge contrast");
+            UserStatus st = u.getStatus() != null ? u.getStatus()
+                    : (u.isEnabled() ? UserStatus.ACTIVE : UserStatus.DISABLED);
+            String label = switch (st) {
+                case INVITED  -> i18n.translate("common.status.INVITED");
+                case ACTIVE   -> i18n.translate("common.active");
+                case DISABLED -> i18n.translate("common.disabled");
+            };
+            String theme = switch (st) {
+                case INVITED  -> "badge";
+                case ACTIVE   -> "badge success";
+                case DISABLED -> "badge contrast";
+            };
+            Span badge = new Span(label);
+            badge.getElement().getThemeList().add(theme);
             return badge;
-        }).setHeader(i18n.translate("common.status")).setFlexGrow(0).setWidth("100px");
-        grid.addColumn(u -> u.createdAt() != null ? u.createdAt().toLocalDate().toString() : "")
+        }).setHeader(i18n.translate("common.status")).setFlexGrow(0).setWidth("110px");
+
+        grid.addColumn(u -> u.getCreatedAt() != null ? u.getCreatedAt().toLocalDate().toString() : "")
                 .setHeader(i18n.translate("common.created")).setFlexGrow(0).setWidth("110px");
-        grid.addComponentColumn(user -> {
+
+        grid.addComponentColumn(u -> {
             HorizontalLayout actions = new HorizontalLayout();
             actions.setSpacing(false);
-            String currentUser = securityService.getUsername();
+            boolean isSelf = u.getUsername().equals(actingUser.getUsername());
 
-            Button toggle = new Button(user.enabled() ? VaadinIcon.BAN.create() : VaadinIcon.CHECK.create(), e -> {
-                if (user.username().equals(currentUser)) {
-                    notify(i18n.translate("view.users.notification.cannotDisableSelf"), true);
-                    return;
-                }
-                userService.toggleEnabled(user.id());
-                grid.getDataProvider().refreshAll();
-                notify(user.enabled()
-                        ? i18n.translate("view.users.notification.disabled", user.username())
-                        : i18n.translate("view.users.notification.enabled", user.username()), false);
-            });
-            toggle.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
-            toggle.getElement().setAttribute("title", user.enabled()
-                    ? i18n.translate("common.disable")
-                    : i18n.translate("common.enable"));
+            UserStatus st = u.getStatus() != null ? u.getStatus()
+                    : (u.isEnabled() ? UserStatus.ACTIVE : UserStatus.DISABLED);
 
-            Button edit = new Button(VaadinIcon.EDIT.create(), e -> openDialog(user));
-            edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+            if (st == UserStatus.INVITED) {
+                Button resend = new Button(VaadinIcon.ENVELOPE.create(), e -> {
+                    try {
+                        String role = u.getRoles().stream().findFirst().orElse("ROLE_USER");
+                        adminService.inviteUser(
+                                new AdminInviteRequest(u.getEmail(), role, u.getWorkspaceId()),
+                                actingUser);
+                        notify(i18n.translate("view.users.notification.resendInvite", u.getEmail()), false);
+                    } catch (Exception ex) {
+                        notify(ex.getMessage(), true);
+                    }
+                });
+                resend.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                resend.getElement().setAttribute("title", i18n.translate("view.users.button.resendInvite"));
+                actions.add(resend);
+            }
 
-            Button delete = new Button(VaadinIcon.TRASH.create(), e -> confirmDelete(user));
-            delete.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ERROR);
-            delete.setEnabled(!user.username().equals(currentUser));
+            if (!isSelf && st != UserStatus.INVITED) {
+                boolean active = st == UserStatus.ACTIVE;
+                Button toggle = new Button(active ? VaadinIcon.BAN.create() : VaadinIcon.CHECK.create(), e -> {
+                    try {
+                        if (active) adminService.disableUser(u.getId(), actingUser);
+                        else        adminService.enableUser(u.getId(), actingUser);
+                        refresh();
+                        notify(active
+                                ? i18n.translate("view.users.notification.disabled", u.getUsername())
+                                : i18n.translate("view.users.notification.enabled", u.getUsername()), false);
+                    } catch (LastAdminException ex) {
+                        notify(i18n.translate("view.users.notification.lastAdmin"), true);
+                    } catch (Exception ex) {
+                        notify(ex.getMessage(), true);
+                    }
+                });
+                toggle.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                toggle.getElement().setAttribute("title",
+                        active ? i18n.translate("common.disable") : i18n.translate("common.enable"));
+                actions.add(toggle);
+            }
 
-            actions.add(toggle, edit, delete);
+            // Edit name/email — available for all users including self
+            Button editBtn = new Button(VaadinIcon.PENCIL.create(), e -> openEditDialog(u));
+            editBtn.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+            editBtn.getElement().setAttribute("title", i18n.translate("view.users.button.edit"));
+            actions.add(editBtn);
+
+            if (!isSelf) {
+                Button roleBtn = new Button(VaadinIcon.EDIT.create(), e -> openChangeRoleDialog(u));
+                roleBtn.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                roleBtn.getElement().setAttribute("title", i18n.translate("view.users.button.changeRole"));
+                actions.add(roleBtn);
+
+                Button deleteBtn = new Button(VaadinIcon.TRASH.create(), e -> confirmDelete(u));
+                deleteBtn.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ERROR);
+                actions.add(deleteBtn);
+            }
+
             return actions;
-        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("160px");
+        }).setHeader(i18n.translate("common.actions")).setFlexGrow(0).setWidth("200px");
     }
 
     private HorizontalLayout buildToolbar() {
@@ -138,81 +225,139 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
         searchField.setPrefixComponent(VaadinIcon.SEARCH.create());
         searchField.setClearButtonVisible(true);
         searchField.setValueChangeMode(ValueChangeMode.LAZY);
-        searchField.addValueChangeListener(e -> grid.getDataProvider().refreshAll());
+        searchField.addValueChangeListener(e -> refresh());
 
-        Button addBtn = new Button(i18n.translate("view.users.button.newUser"),
-                VaadinIcon.PLUS.create(), e -> openDialog(null));
-        addBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        Button inviteBtn = new Button(i18n.translate("view.users.button.inviteUser"),
+                VaadinIcon.PLUS.create(), e -> openInviteDialog());
+        inviteBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        HorizontalLayout toolbar = new HorizontalLayout(searchField, addBtn);
+        HorizontalLayout toolbar = new HorizontalLayout(searchField, inviteBtn);
         toolbar.setDefaultVerticalComponentAlignment(Alignment.END);
         toolbar.setWidthFull();
         toolbar.expand(searchField);
         return toolbar;
     }
 
-    private void openDialog(UserResponse existing) {
+    private void openInviteDialog() {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(existing == null
-                ? i18n.translate("view.users.dialog.new")
-                : i18n.translate("view.users.dialog.edit"));
-        dialog.setWidth("480px");
+        dialog.setHeaderTitle(i18n.translate("view.users.dialog.invite"));
+        dialog.setWidth("420px");
+
+        EmailField email = new EmailField(i18n.translate("common.email"));
+        email.setWidthFull();
+
+        ComboBox<String> roleCombo = new ComboBox<>(i18n.translate("common.roles"));
+        roleCombo.setItems("ROLE_COMPANY_ADMIN", "ROLE_USER", "ROLE_SALES", "ROLE_SUPPORT");
+        roleCombo.setValue("ROLE_USER");
+        roleCombo.setWidthFull();
+        roleCombo.setItemLabelGenerator(r -> i18n.translate("common.role." + r.replace("ROLE_", "")));
+
+        FormLayout form = new FormLayout(email, roleCombo);
+        form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1));
+        dialog.add(form);
+
+        Button send = new Button(i18n.translate("view.users.button.sendInvite"), e -> {
+            if (email.getValue().isBlank()) { email.setInvalid(true); return; }
+            if (roleCombo.getValue() == null) { roleCombo.setInvalid(true); return; }
+            Long wsId = actingUser.getWorkspaceId();
+            if (wsId == null) {
+                notify(i18n.translate("view.users.notification.noWorkspace"), true);
+                return;
+            }
+            try {
+                adminService.inviteUser(
+                        new AdminInviteRequest(email.getValue(), roleCombo.getValue(), wsId),
+                        actingUser);
+                dialog.close();
+                refresh();
+                notify(i18n.translate("view.users.notification.invited", email.getValue()), false);
+            } catch (Exception ex) {
+                notify(ex.getMessage(), true);
+            }
+        });
+        send.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), send);
+        dialog.open();
+    }
+
+    private void openEditDialog(User user) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(i18n.translate("view.users.dialog.edit"));
+        dialog.setWidth("420px");
 
         TextField username = new TextField(i18n.translate("common.username"));
-        username.setEnabled(existing == null);
-        TextField email = new TextField(i18n.translate("common.email"));
-        PasswordField password = new PasswordField(i18n.translate("common.password"));
-        if (existing != null) password.setPlaceholder(i18n.translate("view.users.password.placeholder"));
+        username.setValue(user.getUsername() != null ? user.getUsername() : "");
+        username.setWidthFull();
 
-        CheckboxGroup<String> roles = new CheckboxGroup<>(i18n.translate("common.roles"));
-        roles.setItems("ROLE_USER", "ROLE_ADMIN", "ROLE_SALES", "ROLE_SUPPORT");
-        roles.setValue(Set.of("ROLE_USER"));
+        EmailField email = new EmailField(i18n.translate("common.email"));
+        email.setValue(user.getEmail() != null ? user.getEmail() : "");
+        email.setWidthFull();
 
-        if (existing != null) {
-            username.setValue(nvl(existing.username()));
-            email.setValue(nvl(existing.email()));
-            if (existing.roles() != null) roles.setValue(existing.roles());
-        }
-
-        FormLayout form = new FormLayout(username, email, password, roles);
-        form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 2));
-        form.setColspan(roles, 2);
+        FormLayout form = new FormLayout(username, email);
+        form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1));
         dialog.add(form);
 
         Button save = new Button(i18n.translate("common.save"), e -> {
             if (username.getValue().isBlank()) { username.setInvalid(true); return; }
-            UserRequest req = new UserRequest(
-                    username.getValue(), email.getValue(),
-                    password.getValue().isBlank() ? null : password.getValue(),
-                    roles.getValue().isEmpty() ? Set.of("ROLE_USER") : roles.getValue());
             try {
-                if (existing == null) userService.create(req);
-                else userService.update(existing.id(), req);
-                grid.getDataProvider().refreshAll();
+                userService.updateProfile(user.getId(), username.getValue(), email.getValue());
                 dialog.close();
+                refresh();
                 notify(i18n.translate("view.users.notification.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.getFooter().add(
-                new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
         dialog.open();
     }
 
-    private void confirmDelete(UserResponse user) {
+    private void openChangeRoleDialog(User user) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(i18n.translate("view.users.dialog.changeRole"));
+        dialog.setWidth("360px");
+
+        ComboBox<String> roleCombo = new ComboBox<>(i18n.translate("common.roles"));
+        roleCombo.setItems("ROLE_COMPANY_ADMIN", "ROLE_USER", "ROLE_SALES", "ROLE_SUPPORT");
+        roleCombo.setValue(user.getRoles().stream().findFirst().orElse("ROLE_USER"));
+        roleCombo.setWidthFull();
+        roleCombo.setItemLabelGenerator(r -> i18n.translate("common.role." + r.replace("ROLE_", "")));
+
+        dialog.add(roleCombo);
+
+        Button save = new Button(i18n.translate("common.save"), e -> {
+            if (roleCombo.getValue() == null) { roleCombo.setInvalid(true); return; }
+            try {
+                adminService.changeRole(user.getId(), roleCombo.getValue(), actingUser);
+                dialog.close();
+                refresh();
+                notify(i18n.translate("view.users.notification.roleChanged"), false);
+            } catch (LastAdminException ex) {
+                notify(i18n.translate("view.users.notification.lastAdmin"), true);
+            } catch (Exception ex) {
+                notify(ex.getMessage(), true);
+            }
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
+        dialog.open();
+    }
+
+    private void confirmDelete(User user) {
         ConfirmDialog confirm = new ConfirmDialog();
         confirm.setHeader(i18n.translate("view.users.dialog.deleteHeader"));
-        confirm.setText(i18n.translate("view.users.dialog.deleteConfirm", user.username()));
+        confirm.setText(i18n.translate("view.users.dialog.deleteConfirm", user.getUsername()));
         confirm.setConfirmText(i18n.translate("common.delete"));
         confirm.setConfirmButtonTheme("error primary");
         confirm.setCancelable(true);
         confirm.addConfirmListener(e -> {
             try {
-                userService.delete(user.id());
-                grid.getDataProvider().refreshAll();
+                adminService.removeUser(user.getId(), actingUser);
+                refresh();
                 notify(i18n.translate("view.users.notification.deleted"), false);
+            } catch (LastAdminException ex) {
+                notify(i18n.translate("view.users.notification.lastAdmin"), true);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }
@@ -224,6 +369,4 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
         Notification n = Notification.show(msg, 3000, Notification.Position.BOTTOM_CENTER);
         n.addThemeVariants(error ? NotificationVariant.LUMO_ERROR : NotificationVariant.LUMO_SUCCESS);
     }
-
-    private static String nvl(String s) { return s == null ? "" : s; }
 }

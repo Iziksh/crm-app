@@ -65,6 +65,7 @@ OpenCRX ships as a JEE application on Apache TomEE. This Spring Boot project rep
 | **Activities** | 11 Activity Types | `EMAIL, SALES_VISIT, MAILING, SMS, ABSENCE` added (Phase 11) |
 | **Products** | Product Catalog / Price List | `Product` entity + `ProductsView` (Phase 12) |
 | **Admin** | Managing Users | `UsersView` (admin only) + `UserController` (Phase 13) |
+| **Admin** | User Registration | Admin-issued invitation flow — `InvitationService` + `InvitationController` + `AcceptInviteView`; open self-registration removed |
 | **Data** | Import / Export | CSV import (Contacts, Accounts) + CSV export all grids (Phase 14) |
 | **Notify** | Subscribe / Notify Alerts | `Alert` + `Subscription` + `Topic` entities; `SubscriptionHandlerService` audit-trail scanner; `AlertService.sendAlert()`; bell badge + 3-state mark (NEW/READ/ACCEPTED/EXPIRED); 11 standard Topics; `SubscriptionsView` (Phase 15) |
 | **Documents** | File Attachments | `Attachment` entity, upload on Account/Contact/Activity (Phase 16) |
@@ -126,7 +127,8 @@ crm-app/src/main/java/com/crm/
 │   │   ├── Subscription.java         # BUILT (Phase 15)
 │   │   ├── Topic.java                # BUILT (Phase 15)
 │   │   ├── AuditLog.java             # BUILT (Phase 15)
-│   │   └── TrustedDevice.java        # BUILT (Phase 19) — hashed device-trust tokens
+│   │   ├── TrustedDevice.java        # BUILT (Phase 19) — hashed device-trust tokens
+│   │   └── Invitation.java           # BUILT — single-use admin invitation, SHA-256 token, 72 h expiry
 │   └── enums/
 │       ├── AccountType.java          # BUILT
 │       ├── ContactStatus.java        # BUILT
@@ -152,13 +154,15 @@ crm-app/src/main/java/com/crm/
 │   ├── DeviceTrustService.java       # BUILT (Phase 19) — SHA-256 hashed cookie tokens, 14-day expiry, nightly cleanup
 │   ├── EmailService.java             # BUILT (Phase 19) — async HTML OTP emails via JavaMailSender
 │   ├── OtpService.java               # BUILT (Phase 19) — Caffeine-cached 6-digit codes, 5-min TTL, single-use
+│   ├── InvitationService.java        # BUILT — createInvitation (returns raw token), acceptInvitation, nightly cleanup; sha256() public for tests
 │   └── ...                           # User, Account, Contact, Jwt, etc.
-├── controller/                       # BUILT: Auth, Account, Contact
+├── controller/                       # BUILT: Auth (login only), Invitation, Account, Contact
 ├── security/                         # BUILT: JwtFilter, UserDetailsServiceImpl
-├── exception/                        # BUILT: GlobalHandler, ErrorResponse, exceptions
+├── exception/                        # BUILT: GlobalHandler, ErrorResponse, InvitationInvalidException, etc.
 └── ui/
     ├── LoginView.java                # BUILT (Phase 19) — Vaadin form, checks trusted-device cookie before OTP
     ├── OtpVerificationView.java      # BUILT (Phase 19) — @AnonymousAllowed, resend, trust-device checkbox
+    ├── AcceptInviteView.java         # BUILT — @AnonymousAllowed /accept-invite/{token}; set username+password; all errors show same generic message (no enumeration)
     ├── MainLayout.java               # BUILT — extend nav each phase
     ├── DashboardView.java            # BUILT — extend KPI cards each phase
     ├── AccountsView.java             # BUILT
@@ -209,6 +213,10 @@ crm-app/src/main/java/com/crm/
 #### `trusted_devices`
 `id`, `user_email` (indexed), `token_hash` VARCHAR(64) UNIQUE (SHA-256 of raw cookie token), `expires_at` (indexed), `created_at`
 — Raw token stored only in `DEVICE_TRUST` HttpOnly cookie; only the hash is persisted. Cleaned up nightly at 03:00.
+
+#### `invitations` — (Flyway V2.5.0)
+`id`, `token_hash` VARCHAR(64) UNIQUE (SHA-256 of raw UUID token — never stored), `email`, `role`, `workspace_id` FK→workspaces ON DELETE CASCADE, `expires_at` (72 h from creation), `accepted_at` (null = pending), `created_at`
+— Raw token sent to the invitee by email only; only the hash is persisted. All invalid/expired/already-accepted paths return the same `"Invalid or expired invitation"` message to prevent enumeration. Cleaned up nightly at 04:00 (`@Scheduled`). Indexed on `token_hash` and `email`.
 
 #### `accounts`
 `id`, `name` (NOT NULL), `industry`, `website`, `phone`, `email` (UNIQUE), `address`, `type` (AccountType), `notes` (TEXT), `created_at`, `updated_at`
@@ -303,13 +311,14 @@ SalesOrder 1──* SalesOrderLineItem
 
 ## 7. REST API Reference
 
-All endpoints except `/api/v1/auth/**` require `Authorization: Bearer <JWT>`.
+All endpoints except `POST /api/v1/auth/login` and `GET /accept-invite/**` require `Authorization: Bearer <JWT>`.
 
 ### Built
 
 | Module | Endpoints |
 |---|---|
-| Auth | `POST /api/v1/auth/register`, `POST /api/v1/auth/login` |
+| Auth | `POST /api/v1/auth/login` |
+| Invitations | `POST /api/v1/invitations` — ADMIN only; creates a single-use invitation and emails the link |
 | Accounts | `POST/GET /api/v1/accounts`, `GET/PUT/DELETE /api/v1/accounts/{id}`, `GET /api/v1/accounts/{id}/contacts` |
 | Contacts | `POST/GET /api/v1/contacts`, `GET/PUT/DELETE /api/v1/contacts/{id}` |
 
@@ -3439,16 +3448,9 @@ $jar  = ".\mvn\wrapper\maven-wrapper.jar"
 | `CrmApplicationTests` | Context load | Spring context starts without errors |
 | `AccountServiceTest` | Unit (Mockito) | `create`, `findById`, `delete` |
 | `ContactRepositoryTest` | `@DataJpaTest` (H2) | `findByEmail`, `findByAccount_Id` |
+| `InvitationFlowIntegrationTest` | `@SpringBootTest` (H2) | Anonymous register rejected; valid invite accepted once; token reuse fails; expired token fails; user gets correct role + workspace |
 
 Test reports are written to `target/surefire-reports/` after each run.
-
-### Existing Tests
-
-| Class | Type | Coverage |
-|---|---|---|
-| `AccountServiceTest` | Unit (Mockito) | create, findById, delete |
-| `ContactRepositoryTest` | `@DataJpaTest` | findByEmail, findByAccount_Id |
-| `CrmApplicationTests` | Context load | starts |
 
 ### Test Convention for New Modules
 
@@ -3463,7 +3465,9 @@ For each new repository, add `LeadRepositoryTest`:
 
 ---
 
-## 13. Default Credentials
+## 13. Default Credentials & User Access
+
+### Built-in admin account
 
 Seeded on first boot by `DataInitializer`:
 
@@ -3477,6 +3481,57 @@ Seeded on first boot by `DataInitializer`:
 **Change this password before exposing to any network.**
 
 > **2FA note:** Login sends a 6-digit OTP to the admin email via SMTP. Configure `spring.mail.*` and `app.admin.email` before first login. Check "Remember this device" to skip OTP for 14 days on the same browser.
+
+---
+
+### How new users register (invitation flow)
+
+Open self-registration is **disabled**. Every new user must be invited by an admin.
+
+#### Step 1 — Admin sends an invitation
+
+1. Log in as admin → navigate **Settings → Users**
+2. Click **"Invite User"** (next to "New User")
+3. Fill in:
+   - **Email** — the invitee's email address
+   - **Role** — one of `ROLE_USER`, `ROLE_ADMIN`, `ROLE_SALES`, `ROLE_SUPPORT`
+   - **Workspace** — which workspace the new user will belong to (required)
+4. Click **Send Invite**
+
+The system generates a single-use UUID token, stores only its SHA-256 hash in the `invitations` table, and emails the invitee a link:
+```
+http://<APP_BASE_URL>/accept-invite/<raw-token>
+```
+The link expires in **72 hours**.
+
+#### Step 2 — Invitee accepts
+
+1. Invitee opens the link from their email
+2. They are shown a public form (no login required) to choose a **username** and **password** (minimum 12 characters)
+3. On submit the app validates the token (hash match, not expired, not already used) and creates the user account with the role and workspace that the admin specified
+4. The invitee is redirected to the login page
+
+**Security notes:**
+- The raw token is never stored anywhere — only in the email
+- Invalid / expired / already-used tokens all show the same message: `"Invalid or expired invitation"` (no enumeration)
+- Each token is single-use; the `accepted_at` timestamp is set on first use and subsequent attempts are rejected
+- No user is ever created without a workspace
+
+#### REST API (for integrations)
+
+```http
+POST /api/v1/invitations
+Authorization: Bearer <admin-JWT>
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": "ROLE_SALES",
+  "workspaceId": 1
+}
+```
+
+Returns `202 Accepted` with `{ "message": "Invitation sent" }`. The invitation email is dispatched asynchronously.
 
 ---
 

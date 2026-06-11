@@ -9,6 +9,7 @@ import com.crm.exception.ResourceNotFoundException;
 import com.crm.repository.AccountRepository;
 import com.crm.repository.ContactRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,12 +23,16 @@ public class ContactService {
     private final ContactRepository contactRepository;
     private final AccountRepository accountRepository;
     private final CrmEventPublisher eventPublisher;
+    private final WorkspaceContext workspaceContext;
 
-    public ContactService(ContactRepository contactRepository, AccountRepository accountRepository,
-                          CrmEventPublisher eventPublisher) {
+    public ContactService(ContactRepository contactRepository,
+                          AccountRepository accountRepository,
+                          CrmEventPublisher eventPublisher,
+                          WorkspaceContext workspaceContext) {
         this.contactRepository = contactRepository;
         this.accountRepository = accountRepository;
         this.eventPublisher = eventPublisher;
+        this.workspaceContext = workspaceContext;
     }
 
     public ContactResponse create(ContactRequest request) {
@@ -35,6 +40,7 @@ public class ContactService {
             throw new DuplicateEmailException(request.email());
         }
         Contact contact = mapToEntity(new Contact(), request);
+        workspaceContext.currentUserPrimaryWorkspace().ifPresent(contact::setWorkspace);
         ContactResponse response = ContactResponse.from(contactRepository.save(contact));
         eventPublisher.publishCreated("CONTACT", response.id());
         return response;
@@ -47,32 +53,60 @@ public class ContactService {
 
     @Transactional(readOnly = true)
     public Page<ContactResponse> findAll(Pageable pageable) {
-        return contactRepository.findAll(pageable).map(ContactResponse::from);
+        if (workspaceContext.isAdmin()) {
+            return contactRepository.findAll(pageable).map(ContactResponse::from);
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
+        return contactRepository.findByWorkspace_IdIn(wsIds, pageable).map(ContactResponse::from);
     }
 
     @Transactional(readOnly = true)
     public Page<ContactResponse> search(String name, Pageable pageable) {
-        return contactRepository
-                .findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(name, name, pageable)
-                .map(ContactResponse::from);
+        if (workspaceContext.isAdmin()) {
+            return contactRepository
+                    .findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(name, name, pageable)
+                    .map(ContactResponse::from);
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
+        return contactRepository.searchByWorkspaceIds(name, wsIds, pageable).map(ContactResponse::from);
     }
 
     @Transactional(readOnly = true)
     public long count(String search) {
-        if (search != null && !search.isBlank()) {
-            return contactRepository.countByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(search, search);
+        if (workspaceContext.isAdmin()) {
+            if (search != null && !search.isBlank()) {
+                return contactRepository.countByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(search, search);
+            }
+            return contactRepository.count();
         }
-        return contactRepository.count();
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return 0;
+        if (search != null && !search.isBlank()) {
+            return contactRepository.countSearchByWorkspaceIds(search, wsIds);
+        }
+        return contactRepository.countByWorkspace_IdIn(wsIds);
     }
 
     @Transactional(readOnly = true)
     public List<ContactResponse> findAllForExport(String search) {
-        if (search != null && !search.isBlank()) {
-            return contactRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(
-                    search, search, org.springframework.data.domain.Pageable.unpaged())
-                    .getContent().stream().map(ContactResponse::from).toList();
+        if (workspaceContext.isAdmin()) {
+            if (search != null && !search.isBlank()) {
+                return contactRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(
+                        search, search, org.springframework.data.domain.Pageable.unpaged())
+                        .getContent().stream().map(ContactResponse::from).toList();
+            }
+            return contactRepository.findAll().stream().map(ContactResponse::from).toList();
         }
-        return contactRepository.findAll().stream().map(ContactResponse::from).toList();
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) return List.of();
+        if (search != null && !search.isBlank()) {
+            return contactRepository.searchAllByWorkspaceIds(search, wsIds,
+                    org.springframework.data.domain.Pageable.unpaged())
+                    .stream().map(ContactResponse::from).toList();
+        }
+        return contactRepository.findAllByWorkspaceIds(wsIds).stream().map(ContactResponse::from).toList();
     }
 
     @Transactional(readOnly = true)

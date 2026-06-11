@@ -24,14 +24,18 @@ public class EmailService {
     private final EmailLocaleResolver emailLocaleResolver;
     private final int otpExpiryMinutes;
 
+    private final String baseUrl;
+
     public EmailService(JavaMailSender mailSender,
                         @Value("${spring.mail.username}") String fromAddress,
+                        @Value("${app.base-url:http://localhost:9080}") String baseUrl,
                         TranslationService translationService,
                         EmailTemplateService emailTemplateService,
                         EmailLocaleResolver emailLocaleResolver,
                         @Value("${otp.expiry-minutes:5}") int otpExpiryMinutes) {
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
+        this.baseUrl = baseUrl;
         this.translationService = translationService;
         this.emailTemplateService = emailTemplateService;
         this.emailLocaleResolver = emailLocaleResolver;
@@ -81,6 +85,43 @@ public class EmailService {
             log.info("EMAIL activity sent to {}", toEmail);
         } catch (Exception e) {
             log.error("Failed to send EMAIL activity to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendInvite(String toEmail, String otpCode) {
+        sendInvite(toEmail, otpCode, emailLocaleResolver.resolveForEmail(toEmail));
+    }
+
+    @Async
+    public void sendInvite(String toEmail, String otpCode, Locale locale) {
+        try {
+            Locale resolved = locale != null ? locale : emailLocaleResolver.resolveForEmail(toEmail);
+            String encodedEmail = java.net.URLEncoder.encode(toEmail, java.nio.charset.StandardCharsets.UTF_8);
+            String inviteLink = baseUrl + "/verify-invite?email=" + encodedEmail;
+
+            String subject = translationService.translate(resolved, "email.invite.subject");
+            String html = emailTemplateService.renderHtml("invitation", resolved, Map.of(
+                    "heading",   translationService.translate(resolved, "email.invite.heading"),
+                    "greeting",  translationService.translate(resolved, "email.invite.greeting"),
+                    "body",      translationService.translate(resolved, "email.invite.body", otpCode),
+                    "cta",       translationService.translate(resolved, "email.invite.cta"),
+                    "inviteLink", inviteLink,
+                    "linkNote",  translationService.translate(resolved, "email.invite.linkNote"),
+                    "expiry",    translationService.translate(resolved, "email.invite.expiry", otpExpiryMinutes),
+                    "footer",    translationService.translate(resolved, "email.invite.footer")
+            ));
+
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, "UTF-8");
+            helper.setFrom(fromAddress);
+            helper.setTo(toEmail);
+            helper.setSubject(subject);
+            helper.setText(html, true);
+            mailSender.send(mime);
+            log.info("Invite email sent to {} (locale={})", toEmail, resolved.getLanguage());
+        } catch (Exception e) {
+            log.error("Failed to send invite email to {}: {}", toEmail, e.getMessage(), e);
         }
     }
 

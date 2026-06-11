@@ -17,6 +17,7 @@ public record ContactResponse(
         String notes,
         Long accountId,
         String accountName,
+        String workspaceName,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -33,6 +34,7 @@ public record ContactResponse(
                 contact.getNotes(),
                 contact.getAccount() != null ? contact.getAccount().getId() : null,
                 contact.getAccount() != null ? contact.getAccount().getName() : null,
+                contact.getWorkspace() != null ? contact.getWorkspace().getName() : null,
                 contact.getCreatedAt(),
                 contact.getUpdatedAt()
         );

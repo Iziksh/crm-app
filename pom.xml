@@ -104,6 +104,17 @@
             <version>${springdoc.version}</version>
         </dependency>
 
+        <!-- Flyway — schema migrations -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <!-- Flyway 10+ requires explicit PostgreSQL plugin -->
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
         <!-- Email -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
