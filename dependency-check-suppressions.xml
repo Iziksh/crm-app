@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+    <!-- CVE-2026-42582 affects netty-codec-http3 only; ODC/NVD incorrectly flags other Netty modules -->
+    <suppress>
+        <notes>False positive: CVE-2026-42582 is http3-only; project uses Netty 4.1.135 which is patched</notes>
+        <packageUrl regex="true">^pkg:maven/io\.netty/(?!netty-codec-http3).*@.*$</packageUrl>
+        <cve>CVE-2026-42582</cve>
+    </suppress>
+
+    <!-- NVD CPE range incorrectly flags Kotlin 1.9.x for a pre-1.4.21 issue (ODC issue #8343) -->
+    <suppress>
+        <notes>False positive: CVE-2020-29582 fixed in Kotlin 1.4.21; NVD range incorrectly includes 1.9.x</notes>
+        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/kotlin-(common|stdlib-common|stdlib|reflect|stdlib-jdk7|stdlib-jdk8)@.*$</packageUrl>
+        <cve>CVE-2020-29582</cve>
+    </suppress>
+
+    <!-- Vaadin dev artifacts are excluded from production builds (-Pproduction drops vaadin-dev) -->
+    <suppress>
+        <notes>Dev-only Vaadin frontend bundle; not shipped in production JAR</notes>
+        <filePath regex="true">.*vaadin-dev.*</filePath>
+        <vulnerabilityName regex="true">.*</vulnerabilityName>
+    </suppress>
+
+</suppressions>
