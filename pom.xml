@@ -27,7 +27,7 @@
         <byte-buddy.version>1.17.5</byte-buddy.version>
         <mockito.version>5.20.0</mockito.version>
         <jacoco.version>0.8.12</jacoco.version>
-        <dependency-check.version>11.1.1</dependency-check.version>
+        <dependency-check.version>12.2.2</dependency-check.version>
     </properties>
 
     <dependencyManagement>

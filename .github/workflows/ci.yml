@@ -186,9 +186,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: owasp-nvd-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          key: owasp-nvd-v2-${{ runner.os }}-${{ hashFiles('pom.xml') }}
           restore-keys: |
-            owasp-nvd-${{ runner.os }}-
+            owasp-nvd-v2-${{ runner.os }}-
 
       - name: Verify NVD API key secret
         run: |
