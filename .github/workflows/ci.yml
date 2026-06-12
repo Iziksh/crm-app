@@ -182,6 +182,24 @@ jobs:
           distribution: temurin
           cache: maven
 
+      - name: Cache OWASP NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: owasp-nvd-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            owasp-nvd-${{ runner.os }}-
+
+      - name: Verify NVD API key secret
+        run: |
+          if [ -z "${NVD_API_KEY}" ]; then
+            echo "::warning::NVD_API_KEY secret is empty or missing. Add it under Settings → Secrets and variables → Actions (exact name: NVD_API_KEY)."
+            exit 1
+          fi
+          echo "NVD_API_KEY is configured."
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
       - name: Run OWASP Dependency-Check
         run: mvn -B -Psecurity dependency-check:check
         env:

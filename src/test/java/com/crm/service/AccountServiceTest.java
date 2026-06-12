@@ -1,6 +1,7 @@
 package com.crm.service;
 
 import com.crm.domain.entity.Account;
+import com.crm.domain.entity.Workspace;
 import com.crm.dto.request.AccountRequest;
 import com.crm.dto.response.AccountResponse;
 import com.crm.exception.DuplicateEmailException;
@@ -24,10 +25,15 @@ class AccountServiceTest {
 
     @Mock AccountRepository accountRepository;
     @Mock CrmEventPublisher eventPublisher;
+    @Mock WorkspaceContext workspaceContext;
     @InjectMocks AccountService accountService;
 
     @Test
     void create_savesAccount() {
+        Workspace workspace = new Workspace();
+        workspace.setId(1L);
+        when(workspaceContext.currentUserPrimaryWorkspace()).thenReturn(Optional.of(workspace));
+
         AccountRequest req = new AccountRequest("Acme", null, null, null, null, null, null, null);
         Account saved = new Account();
         saved.setName("Acme");

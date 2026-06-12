@@ -34,7 +34,7 @@ class EmailServiceTest {
         when(translationService.translate(any(Locale.class), anyString(), any())).thenReturn("Instructions");
         when(emailTemplateService.renderHtml(anyString(), any(Locale.class), anyMap())).thenReturn("<html>body</html>");
 
-        emailService = new EmailService(mailSender, "from@example.com",
+        emailService = new EmailService(mailSender, "from@example.com", "http://localhost:9080",
                 translationService, emailTemplateService, emailLocaleResolver, 5);
     }
 
