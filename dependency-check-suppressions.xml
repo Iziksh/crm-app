@@ -19,13 +19,7 @@
     <suppress>
         <notes>Dev-only Vaadin frontend bundle; not shipped in production JAR</notes>
         <filePath regex="true">.*vaadin-dev.*</filePath>
-    </suppress>
-
-    <!-- Embedded JS in dev bundle (RetireJS) — covered by dev-only exclusion above; explicit for DOMPurify/quill -->
-    <suppress>
-        <notes>Dev-only embedded JS libraries inside vaadin-dev-bundle</notes>
-        <packageUrl regex="true">^pkg:javascript/(DOMPurify|quill)@.*$</packageUrl>
-        <filePath regex="true">.*vaadin-dev.*</filePath>
+        <vulnerabilityName regex="true">.*</vulnerabilityName>
     </suppress>
 
 </suppressions>
