@@ -8,8 +8,9 @@ on:
     branches:
       - master
 
+# Cancel in-progress runs when a newer commit is pushed to the same branch/PR.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -139,7 +140,7 @@ jobs:
         with:
           name: jacoco-html-report
           path: target/site/jacoco/
-          retention-days: 14
+          retention-days: 7
 
       - name: Upload JaCoCo XML report
         uses: actions/upload-artifact@v4
@@ -147,7 +148,7 @@ jobs:
         with:
           name: jacoco-xml-report
           path: target/site/jacoco/jacoco.xml
-          retention-days: 14
+          retention-days: 7
 
   dependency-review:
     name: Dependency Review
@@ -182,13 +183,12 @@ jobs:
           distribution: temurin
           cache: maven
 
+      # NVD data is global — key by OS only to avoid a new ~500 MB cache on every pom.xml change.
       - name: Cache OWASP NVD database
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: owasp-nvd-v2-${{ runner.os }}-${{ hashFiles('pom.xml') }}
-          restore-keys: |
-            owasp-nvd-v2-${{ runner.os }}-
+          key: owasp-nvd-v3-${{ runner.os }}
 
       - name: Verify NVD API key secret
         run: |
@@ -211,4 +211,4 @@ jobs:
         with:
           name: owasp-dependency-check-report
           path: target/dependency-check-report.html
-          retention-days: 14
+          retention-days: 7
