@@ -21,8 +21,11 @@
     <properties>
         <java.version>17</java.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <springdoc.version>2.8.6</springdoc.version>
-        <vaadin.version>24.5.14</vaadin.version>
+        <springdoc.version>2.8.17</springdoc.version>
+        <vaadin.version>24.9.11</vaadin.version>
+        <poi.version>5.4.1</poi.version>
+        <swagger-ui.version>5.32.6</swagger-ui.version>
+        <log4j2.version>2.25.4</log4j2.version>
         <!-- Spring Boot 3.5.x pins Byte Buddy compatible with newer JDKs; override kept for JDK 25 local dev -->
         <byte-buddy.version>1.17.5</byte-buddy.version>
         <mockito.version>5.20.0</mockito.version>
@@ -38,6 +41,32 @@
                 <version>${vaadin.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Patched transitive dependencies (OWASP / CVE remediation) -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>1.28.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>3.18.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-configuration2</artifactId>
+                <version>2.15.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-fileupload2-core</artifactId>
+                <version>2.0.0-M4</version>
+            </dependency>
+            <dependency>
+                <groupId>org.webjars</groupId>
+                <artifactId>swagger-ui</artifactId>
+                <version>${swagger-ui.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -143,7 +172,7 @@
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
-            <version>5.2.5</version>
+            <version>${poi.version}</version>
         </dependency>
 
         <!-- Test -->
@@ -222,8 +251,10 @@
                         <version>${dependency-check.version}</version>
                         <configuration>
                             <failBuildOnCVSS>9</failBuildOnCVSS>
-                            <!-- Plugin does not auto-read NVD_API_KEY; name the env var explicitly -->
                             <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+                            <suppressionFiles>
+                                <suppressionFile>${project.basedir}/dependency-check-suppressions.xml</suppressionFile>
+                            </suppressionFiles>
                             <formats>
                                 <format>HTML</format>
                                 <format>JSON</format>

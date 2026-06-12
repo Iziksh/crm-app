@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+    <!-- CVE-2026-42582 affects netty-codec-http3 only; ODC incorrectly flags other Netty modules -->
+    <suppress>
+        <notes>False positive: CVE-2026-42582 is fixed in 4.1.133+ for http3; memcache/mqtt/transport are not affected</notes>
+        <packageUrl regex="true">^pkg:maven/io\.netty/netty-(codec-memcache|codec-mqtt|transport)@.*$</packageUrl>
+        <cve>CVE-2026-42582</cve>
+    </suppress>
+
+    <!-- Vaadin dev bundle is not shipped in production (-Pproduction excludes vaadin-dev) -->
+    <suppress>
+        <notes>Dev-only frontend bundle; quill is not included in production JAR</notes>
+        <packageUrl regex="true">^pkg:javascript/quill@.*$</packageUrl>
+        <cve>CVE-2021-3163</cve>
+    </suppress>
+
+    <!-- log4j-api is on classpath via POI; app uses Logback, not Log4j1XmlLayout bridge -->
+    <suppress>
+        <notes>CVE-2026-34479 affects log4j-1.2-api Log4j1XmlLayout only; this app does not use that bridge</notes>
+        <packageUrl regex="true">^pkg:maven/org\.apache\.logging\.log4j/log4j-api@.*$</packageUrl>
+        <cve>CVE-2026-34479</cve>
+    </suppress>
+    <suppress>
+        <notes>CVE-2026-34477 affects log4j-1.2-api bridge only; this app uses Logback via Spring Boot</notes>
+        <packageUrl regex="true">^pkg:maven/org\.apache\.logging\.log4j/log4j-api@.*$</packageUrl>
+        <cve>CVE-2026-34477</cve>
+    </suppress>
+
+</suppressions>
