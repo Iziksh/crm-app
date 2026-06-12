@@ -1,0 +1,108 @@
+name: Cache Cleanup
+
+on:
+  schedule:
+    # Weekly on Sunday at 03:00 UTC — complements GitHub's 7-day idle eviction.
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Delete caches not accessed within this many days"
+        required: false
+        default: "14"
+        type: string
+      keep_most_recent:
+        description: "Minimum number of newest caches to always retain"
+        required: false
+        default: "5"
+        type: string
+
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: Prune stale caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete stale action caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const retentionDays = parseInt(
+              "${{ github.event.inputs.retention_days || '14' }}",
+              10
+            );
+            const keepMostRecent = parseInt(
+              "${{ github.event.inputs.keep_most_recent || '5' }}",
+              10
+            );
+
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - retentionDays);
+
+            const { owner, repo } = context.repo;
+            const caches = await github.paginate(
+              github.rest.actions.getActionsCacheList,
+              { owner, repo, per_page: 100 }
+            );
+
+            if (caches.length === 0) {
+              core.info("No caches found.");
+              return;
+            }
+
+            // Sort newest first so we always protect the most recently used entries.
+            caches.sort(
+              (a, b) => new Date(b.last_accessed_at) - new Date(a.last_accessed_at)
+            );
+
+            const protectedIds = new Set(
+              caches.slice(0, keepMostRecent).map((cache) => cache.id)
+            );
+
+            let deleted = 0;
+            let skipped = 0;
+
+            for (const cache of caches) {
+              const lastAccessed = new Date(cache.last_accessed_at);
+
+              if (protectedIds.has(cache.id)) {
+                skipped += 1;
+                continue;
+              }
+
+              if (lastAccessed >= cutoff) {
+                skipped += 1;
+                continue;
+              }
+
+              await github.rest.actions.deleteActionsCacheById({
+                owner,
+                repo,
+                cache_id: cache.id,
+              });
+              core.info(
+                `Deleted cache ${cache.id} (key: ${cache.key}, last accessed: ${cache.last_accessed_at})`
+              );
+              deleted += 1;
+            }
+
+            core.summary.addHeading("Cache cleanup summary");
+            core.summary.addTable([
+              [
+                { data: "Metric", header: true },
+                { data: "Value", header: true },
+              ],
+              ["Total caches", String(caches.length)],
+              ["Retention cutoff (days)", String(retentionDays)],
+              ["Protected (newest)", String(keepMostRecent)],
+              ["Deleted", String(deleted)],
+              ["Skipped", String(skipped)],
+            ]);
+            await core.summary.write();
