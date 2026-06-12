@@ -252,6 +252,9 @@
                         <configuration>
                             <failBuildOnCVSS>9</failBuildOnCVSS>
                             <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+                            <!-- Vaadin embeds package.json inside JARs; no root npm project in CI -->
+                            <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+                            <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
                             <suppressionFiles>
                                 <suppressionFile>${project.basedir}/dependency-check-suppressions.xml</suppressionFile>
                             </suppressionFiles>
