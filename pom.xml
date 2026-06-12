@@ -255,6 +255,8 @@
                             <!-- Vaadin embeds package.json inside JARs; no root npm project in CI -->
                             <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
                             <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
+                            <!-- OSS Index requires Sonatype credentials; Java scan uses NVD -->
+                            <ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
                             <suppressionFiles>
                                 <suppressionFile>${project.basedir}/dependency-check-suppressions.xml</suppressionFile>
                             </suppressionFiles>
