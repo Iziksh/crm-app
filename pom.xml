@@ -222,6 +222,8 @@
                         <version>${dependency-check.version}</version>
                         <configuration>
                             <failBuildOnCVSS>9</failBuildOnCVSS>
+                            <!-- Plugin does not auto-read NVD_API_KEY; name the env var explicitly -->
+                            <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
                             <formats>
                                 <format>HTML</format>
                                 <format>JSON</format>
