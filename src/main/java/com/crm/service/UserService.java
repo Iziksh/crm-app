@@ -125,6 +125,17 @@ public class UserService {
         return UserResponse.from(userRepository.save(user));
     }
 
+    public void updateProfile(Long id, String newUsername, String newEmail) {
+        User user = getOrThrow(id);
+        if (newUsername != null && !newUsername.isBlank()) {
+            user.setUsername(newUsername.trim());
+        }
+        if (newEmail != null && !newEmail.isBlank()) {
+            user.setEmail(newEmail.trim().toLowerCase());
+        }
+        userRepository.save(user);
+    }
+
     public UserResponse update(Long id, UserRequest request) {
         User user = getOrThrow(id);
         user.setEmail(request.email());

@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,6 +24,24 @@ public interface AccountRepository extends JpaRepository<Account, Long>, JpaSpec
     Page<Account> findByNameContainingIgnoreCase(String name, Pageable pageable);
     long countByNameContainingIgnoreCase(String name);
     boolean existsByEmail(String email);
+
+    // Workspace-scoped queries (for non-admin users)
+    Page<Account> findByWorkspace_IdIn(Collection<Long> workspaceIds, Pageable pageable);
+    long countByWorkspace_IdIn(Collection<Long> workspaceIds);
+
+    @Query("SELECT a FROM Account a WHERE a.workspace.id IN :ids AND LOWER(a.name) LIKE LOWER(CONCAT('%',:q,'%'))")
+    Page<Account> searchByWorkspaceIds(@Param("q") String q,
+                                       @Param("ids") Collection<Long> ids,
+                                       Pageable pageable);
+
+    @Query("SELECT COUNT(a) FROM Account a WHERE a.workspace.id IN :ids AND LOWER(a.name) LIKE LOWER(CONCAT('%',:q,'%'))")
+    long countSearchByWorkspaceIds(@Param("q") String q, @Param("ids") Collection<Long> ids);
+
+    @Query("SELECT a FROM Account a WHERE a.workspace.id IN :ids AND LOWER(a.name) LIKE LOWER(CONCAT('%',:q,'%'))")
+    List<Account> searchAllByWorkspaceIds(@Param("q") String q, @Param("ids") Collection<Long> ids);
+
+    @Query("SELECT a FROM Account a WHERE a.workspace.id IN :ids")
+    List<Account> findAllByWorkspaceIds(@Param("ids") Collection<Long> ids);
 
     // A-01: Dormant accounts with no recent activities, leads, or opportunities
     @Query("""

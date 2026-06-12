@@ -90,13 +90,23 @@ public class ContactsView extends VerticalLayout implements HasDynamicTitle {
 
     private void configureGrid() {
         grid.setSizeFull();
-        grid.addColumn(ContactResponse::firstName).setHeader(i18n.translate("view.contacts.column.firstName")).setSortable(true);
-        grid.addColumn(ContactResponse::lastName).setHeader(i18n.translate("view.contacts.column.lastName")).setSortable(true);
-        grid.addColumn(ContactResponse::email).setHeader(i18n.translate("common.column.email"));
-        grid.addColumn(ContactResponse::phone).setHeader(i18n.translate("common.column.phone"));
-        grid.addColumn(ContactResponse::jobTitle).setHeader(i18n.translate("view.contacts.column.jobTitle"));
-        grid.addColumn(ContactResponse::accountName).setHeader(i18n.translate("common.column.account")).setSortable(true);
-        grid.addColumn(c -> i18n.translateEnum(c.status())).setHeader(i18n.translate("common.column.status")).setSortable(true);
+        grid.addColumn(ContactResponse::firstName).setHeader(i18n.translate("view.contacts.column.firstName")).setSortable(true).setAutoWidth(true);
+        grid.addComponentColumn(c -> {
+            com.vaadin.flow.component.html.Div cell = new com.vaadin.flow.component.html.Div();
+            cell.getStyle().set("line-height", "1.3");
+            cell.add(new Span(c.lastName() != null ? c.lastName() : ""));
+            if (c.workspaceName() != null) {
+                Span company = new Span(c.workspaceName());
+                company.getStyle().set("font-size", "0.8em").set("color", "var(--lumo-secondary-text-color)").set("display", "block");
+                cell.add(company);
+            }
+            return cell;
+        }).setHeader(i18n.translate("view.contacts.column.lastName")).setSortable(false).setAutoWidth(true);
+        grid.addColumn(c -> c.accountName() != null ? c.accountName() : "—").setHeader(i18n.translate("common.column.account")).setSortable(true).setAutoWidth(true);
+        grid.addColumn(ContactResponse::email).setHeader(i18n.translate("common.column.email")).setAutoWidth(true);
+        grid.addColumn(ContactResponse::phone).setHeader(i18n.translate("common.column.phone")).setAutoWidth(true);
+        grid.addColumn(ContactResponse::jobTitle).setHeader(i18n.translate("view.contacts.column.jobTitle")).setAutoWidth(true);
+        grid.addColumn(c -> i18n.translateEnum(c.status())).setHeader(i18n.translate("common.column.status")).setSortable(true).setAutoWidth(true);
         grid.addComponentColumn(contact -> {
             Button edit = new Button(VaadinIcon.EDIT.create(), e -> openDialog(contact));
             edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
@@ -210,10 +220,11 @@ public class ContactsView extends VerticalLayout implements HasDynamicTitle {
         ComboBox<ContactStatus> status = new ComboBox<>(i18n.translate("common.column.status"));
         status.setItems(ContactStatus.values());
         status.setItemLabelGenerator(i18n::translateEnum);
+        boolean isGlobalAdmin = securityService.hasRole("ADMIN") || securityService.hasRole("SUPER_ADMIN");
         ComboBox<AccountResponse> account = new ComboBox<>(i18n.translate("common.column.account"));
         account.setItems(accounts);
         account.setItemLabelGenerator(AccountResponse::name);
-        account.setClearButtonVisible(true);
+        account.setClearButtonVisible(isGlobalAdmin);
         TextField notes = new TextField(i18n.translate("common.column.notes"));
 
         if (existing != null) {
@@ -228,6 +239,12 @@ public class ContactsView extends VerticalLayout implements HasDynamicTitle {
             if (existing.accountId() != null) {
                 accounts.stream().filter(a -> a.id().equals(existing.accountId()))
                         .findFirst().ifPresent(account::setValue);
+            }
+        } else if (!isGlobalAdmin && !accounts.isEmpty()) {
+            // Non-admin users: auto-select their workspace company
+            account.setValue(accounts.get(0));
+            if (accounts.size() == 1) {
+                account.setReadOnly(true);
             }
         }
 

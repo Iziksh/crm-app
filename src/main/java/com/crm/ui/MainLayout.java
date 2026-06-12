@@ -9,6 +9,8 @@ import com.crm.dto.response.UserSummaryResponse;
 
 import com.crm.service.AlertService;
 
+import com.crm.service.WorkspaceContext;
+
 import com.crm.service.LocaleService;
 
 import com.crm.service.NotificationService;
@@ -81,6 +83,8 @@ public class MainLayout extends AppLayout {
 
     private final UserService userService;
 
+    private final WorkspaceContext workspaceContext;
+
     private final LocaleService localeService;
 
     private final TranslationService i18n;
@@ -95,6 +99,8 @@ public class MainLayout extends AppLayout {
 
                       NotificationService notificationService, UserService userService,
 
+                      WorkspaceContext workspaceContext,
+
                       LocaleService localeService, TranslationService i18n) {
 
         this.securityService = securityService;
@@ -104,6 +110,8 @@ public class MainLayout extends AppLayout {
         this.notificationService = notificationService;
 
         this.userService = userService;
+
+        this.workspaceContext = workspaceContext;
 
         this.localeService = localeService;
 
@@ -156,9 +164,63 @@ public class MainLayout extends AppLayout {
 
     private void createHeader() {
 
-        H1 title = new H1(i18n.translate("app.name"));
+        // ── Brand block: CRM logo + company name ─────────────────────────────
 
-        title.addClassNames(LumoUtility.FontSize.LARGE, LumoUtility.Margin.NONE);
+        Span logoText = new Span(i18n.translate("app.name"));
+
+        logoText.getStyle()
+
+                .set("font-size", "20px")
+
+                .set("font-weight", "700")
+
+                .set("color", "#1565c0")
+
+                .set("letter-spacing", "1px")
+
+                .set("line-height", "1.1");
+
+
+
+        String companyName = workspaceContext.currentUserPrimaryWorkspace()
+
+                .map(ws -> ws.getName())
+
+                .orElse(null);
+
+
+
+        Div brand = new Div();
+
+        brand.getStyle().set("display", "flex").set("flex-direction", "column").set("justify-content", "center");
+
+        brand.add(logoText);
+
+
+
+        if (companyName != null) {
+
+            Span companySpan = new Span(companyName.toUpperCase());
+
+            companySpan.getStyle()
+
+                    .set("font-size", "10px")
+
+                    .set("font-weight", "600")
+
+                    .set("color", "#90a4ae")
+
+                    .set("letter-spacing", "1.5px")
+
+                    .set("line-height", "1.1")
+
+                    .set("margin-top", "1px");
+
+            brand.add(companySpan);
+
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
 
 
 
@@ -204,11 +266,11 @@ public class MainLayout extends AppLayout {
 
         HorizontalLayout header = new HorizontalLayout(
 
-                new DrawerToggle(), title, userSpan, languageSwitcher, bellWrapper, logout);
+                new DrawerToggle(), brand, userSpan, languageSwitcher, bellWrapper, logout);
 
         header.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
 
-        header.expand(title);
+        header.expand(brand);
 
         header.setWidthFull();
 
@@ -552,9 +614,13 @@ public class MainLayout extends AppLayout {
 
         settings.addItem(new SideNavItem(i18n.translate("nav.subscriptions"), SubscriptionsView.class, VaadinIcon.BELL.create()));
 
-        if (securityService.hasRole("ADMIN")) {
+        if (securityService.hasRole("ADMIN") || securityService.hasRole("COMPANY_ADMIN") || securityService.hasRole("SUPER_ADMIN")) {
 
             settings.addItem(new SideNavItem(i18n.translate("nav.users"), UsersView.class, VaadinIcon.USERS.create()));
+
+        }
+
+        if (securityService.hasRole("ADMIN")) {
 
             settings.addItem(new SideNavItem(i18n.translate("nav.taskQueue"), ScheduledTasksView.class, VaadinIcon.TIMER.create()));
 

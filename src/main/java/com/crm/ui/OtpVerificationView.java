@@ -29,6 +29,7 @@ import com.vaadin.flow.server.VaadinSession;
 import com.vaadin.flow.server.auth.AnonymousAllowed;
 import com.vaadin.flow.theme.lumo.LumoUtility;
 import jakarta.servlet.http.Cookie;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
@@ -46,6 +47,7 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
     private final EmailService emailService;
     private final DeviceTrustService deviceTrustService;
     private final UserDetailsService userDetailsService;
+    private final RoleHierarchy roleHierarchy;
     private final LocaleService localeService;
     private final TranslationService i18n;
 
@@ -57,12 +59,14 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
                                EmailService emailService,
                                DeviceTrustService deviceTrustService,
                                UserDetailsService userDetailsService,
+                               RoleHierarchy roleHierarchy,
                                LocaleService localeService,
                                TranslationService i18n) {
         this.otpService = otpService;
         this.emailService = emailService;
         this.deviceTrustService = deviceTrustService;
         this.userDetailsService = userDetailsService;
+        this.roleHierarchy = roleHierarchy;
         this.localeService = localeService;
         this.i18n = i18n;
 
@@ -167,10 +171,11 @@ public class OtpVerificationView extends VerticalLayout implements BeforeEnterOb
             return;
         }
 
-        // OTP valid — load user and complete authentication
+        // OTP valid — load user and complete authentication (expand roles via hierarchy)
         UserDetails userDetails = userDetailsService.loadUserByUsername(pendingUsername);
         Authentication auth = new UsernamePasswordAuthenticationToken(
-                userDetails, null, userDetails.getAuthorities());
+                userDetails, null,
+                roleHierarchy.getReachableGrantedAuthorities(userDetails.getAuthorities()));
 
         if (trustDevice) {
             String rawToken = deviceTrustService.createTrustToken(pendingEmail);

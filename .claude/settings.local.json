@@ -12,7 +12,14 @@
       "Bash(gh api *)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "PowerShell(gh api *)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(mvn test *)",
+      "Bash(./mvnw test *)",
+      "Bash(MAVEN_OPTS=\"-Xmx512m\" cmd.exe /c \"mvnw.cmd test -Dtest=AdminUserManagementServiceTest --no-transfer-progress 2>&1\")",
+      "Bash(cmd.exe //c \"echo hello\")",
+      "Bash(cmd.exe //c \"cd /d C:\\\\crm\\\\crm-app && mvnw.cmd test -Dtest=AdminUserManagementServiceTest --no-transfer-progress\")",
+      "Bash(cmd.exe //c \"cd /d C:\\\\crm\\\\crm-app && C:\\\\crm\\\\crm-app\\\\mvnw.cmd test -Dtest=AdminUserManagementServiceTest --no-transfer-progress\")",
+      "Bash(java -Dmaven.multiModuleProjectDirectory=. -cp \".mvn/wrapper/maven-wrapper.jar\" org.apache.maven.wrapper.MavenWrapperMain compile -q)"
     ]
   }
 }

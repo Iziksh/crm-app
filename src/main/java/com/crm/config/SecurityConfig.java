@@ -6,6 +6,8 @@ import com.vaadin.flow.spring.security.VaadinWebSecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -45,6 +47,9 @@ public class SecurityConfig extends VaadinWebSecurity {
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/admin/users/verify-invite").permitAll()
+                .requestMatchers("/api/v1/admin/users/**")
+                        .hasAnyRole("ADMIN", "SUPER_ADMIN", "COMPANY_ADMIN")
                 .requestMatchers("/api/v1/leads/**", "/api/v1/opportunities/**",
                         "/api/v1/quotes/**", "/api/v1/sales-orders/**",
                         "/api/v1/contracts/**", "/api/v1/forecast/**").hasAnyRole("SALES", "ADMIN")
@@ -70,8 +75,19 @@ public class SecurityConfig extends VaadinWebSecurity {
     }
 
     @Bean
+    public RoleHierarchy roleHierarchy() {
+        return RoleHierarchyImpl.fromHierarchy(
+                "ROLE_SUPER_ADMIN > ROLE_COMPANY_ADMIN\n" +
+                "ROLE_COMPANY_ADMIN > ROLE_ADMIN\n" +
+                "ROLE_ADMIN > ROLE_SALES\n" +
+                "ROLE_ADMIN > ROLE_SUPPORT\n" +
+                "ROLE_ADMIN > ROLE_USER"
+        );
+    }
+
+    @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean
@@ -79,6 +95,8 @@ public class SecurityConfig extends VaadinWebSecurity {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
         provider.setUserDetailsService(userDetailsService);
         provider.setPasswordEncoder(passwordEncoder());
+        provider.setAuthoritiesMapper(authorities ->
+                roleHierarchy().getReachableGrantedAuthorities(authorities));
         return provider;
     }
 
