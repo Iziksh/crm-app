@@ -73,7 +73,7 @@ class AdminUserManagementIntegrationTest {
 
         // Simulate correct OTP
         String otp = otpService.generateAndStore("new@a.com");
-        User activated = adminService.verifyInviteOtp("new@a.com", otp);
+        User activated = adminService.verifyInviteOtp("new@a.com", otp, "password123!");
 
         assertThat(activated.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(activated.isEnabled()).isTrue();
@@ -175,7 +175,7 @@ class AdminUserManagementIntegrationTest {
         AdminInviteRequest req = new AdminInviteRequest("bad@a.com", "ROLE_USER", wsA.getId());
         adminService.inviteUser(req, adminA);
 
-        assertThatThrownBy(() -> adminService.verifyInviteOtp("bad@a.com", "000000"))
+        assertThatThrownBy(() -> adminService.verifyInviteOtp("bad@a.com", "000000", "password123!"))
                 .isInstanceOf(InvitationInvalidException.class);
     }
 

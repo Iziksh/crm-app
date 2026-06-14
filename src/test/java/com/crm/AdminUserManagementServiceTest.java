@@ -94,9 +94,10 @@ class AdminUserManagementServiceTest {
         invited.setStatus(UserStatus.INVITED);
         when(userRepository.findByEmail("new@co.com")).thenReturn(Optional.of(invited));
         when(otpService.validate("new@co.com", "123456")).thenReturn(true);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        User result = service.verifyInviteOtp("new@co.com", "123456");
+        User result = service.verifyInviteOtp("new@co.com", "123456", "password123!");
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(result.isEnabled()).isTrue();
@@ -110,7 +111,7 @@ class AdminUserManagementServiceTest {
         when(userRepository.findByEmail("new@co.com")).thenReturn(Optional.of(invited));
         when(otpService.validate(anyString(), anyString())).thenReturn(false);
 
-        assertThatThrownBy(() -> service.verifyInviteOtp("new@co.com", "000000"))
+        assertThatThrownBy(() -> service.verifyInviteOtp("new@co.com", "000000", "password123!"))
                 .isInstanceOf(InvitationInvalidException.class);
     }
 
@@ -121,7 +122,7 @@ class AdminUserManagementServiceTest {
         disabled.setStatus(UserStatus.DISABLED);
         when(userRepository.findByEmail("dis@co.com")).thenReturn(Optional.of(disabled));
 
-        assertThatThrownBy(() -> service.verifyInviteOtp("dis@co.com", "123456"))
+        assertThatThrownBy(() -> service.verifyInviteOtp("dis@co.com", "123456", "password123!"))
                 .isInstanceOf(InvitationInvalidException.class);
         verifyNoInteractions(otpService);
     }
@@ -133,7 +134,7 @@ class AdminUserManagementServiceTest {
         active.setStatus(UserStatus.ACTIVE);
         when(userRepository.findByEmail("active@co.com")).thenReturn(Optional.of(active));
 
-        assertThatThrownBy(() -> service.verifyInviteOtp("active@co.com", "123456"))
+        assertThatThrownBy(() -> service.verifyInviteOtp("active@co.com", "123456", "password123!"))
                 .isInstanceOf(InvitationInvalidException.class);
     }
 

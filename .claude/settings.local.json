@@ -19,7 +19,9 @@
       "Bash(cmd.exe //c \"echo hello\")",
       "Bash(cmd.exe //c \"cd /d C:\\\\crm\\\\crm-app && mvnw.cmd test -Dtest=AdminUserManagementServiceTest --no-transfer-progress\")",
       "Bash(cmd.exe //c \"cd /d C:\\\\crm\\\\crm-app && C:\\\\crm\\\\crm-app\\\\mvnw.cmd test -Dtest=AdminUserManagementServiceTest --no-transfer-progress\")",
-      "Bash(java -Dmaven.multiModuleProjectDirectory=. -cp \".mvn/wrapper/maven-wrapper.jar\" org.apache.maven.wrapper.MavenWrapperMain compile -q)"
+      "Bash(java -Dmaven.multiModuleProjectDirectory=. -cp \".mvn/wrapper/maven-wrapper.jar\" org.apache.maven.wrapper.MavenWrapperMain compile -q)",
+      "PowerShell(Set-Location C:\\\\crm\\\\crm-app; $env:JAVA_HOME = \"C:\\\\java\\\\jdk-21\"; cmd /c \"C:\\\\crm\\\\crm-app\\\\mvnw.cmd package -Pproduction -DskipTests > C:\\\\crm\\\\crm-app\\\\build-out.txt 2>&1\"; Write-Host \"Exit: $LASTEXITCODE\"; Get-Content C:\\\\crm\\\\crm-app\\\\build-out.txt | Select-Object -Last 30)",
+      "PowerShell($proc = Start-Process -FilePath \"cmd.exe\" -ArgumentList '/c', 'set \"JAVA_HOME=C:\\\\java\\\\jdk-21\" && cd /d C:\\\\crm\\\\crm-app && call mvnw.cmd package -Pproduction -DskipTests' -NoNewWindow -Wait -PassThru -RedirectStandardOutput \"C:\\\\crm\\\\crm-app\\\\build-stdout.txt\" -RedirectStandardError \"C:\\\\crm\\\\crm-app\\\\build-stderr.txt\"; Write-Host \"Exit: $\\($proc.ExitCode\\)\"; Get-Content C:\\\\crm\\\\crm-app\\\\build-stdout.txt | Select-Object -Last 60; Write-Host \"---STDERR---\"; Get-Content C:\\\\crm\\\\crm-app\\\\build-stderr.txt | Select-Object -Last 20)"
     ]
   }
 }
