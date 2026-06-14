@@ -17,12 +17,13 @@ import java.util.Set;
 
 @Service
 @Transactional(readOnly = true)
-public class WorkspaceContextImpl implements WorkspaceContext {
+public class WorkspaceContextImpl extends WorkspaceContext {
 
     private final UserRepository userRepository;
     private final WorkspaceRepository workspaceRepository;
 
     public WorkspaceContextImpl(UserRepository userRepository, WorkspaceRepository workspaceRepository) {
+        super(userRepository, workspaceRepository);
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
     }
