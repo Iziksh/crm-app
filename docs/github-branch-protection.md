@@ -128,10 +128,17 @@ OWASP Dependency-Check downloads the NVD vulnerability database. For faster, mor
 
 1. Register for a free API key at [NVD API Key registration](https://nvd.nist.gov/developers/request-an-api-key)
 2. Add repository secret: **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `NVD_API_KEY`
-   - Value: your API key
+   - Name: **`NVD_API_KEY`** (exact spelling — case-sensitive)
+   - Value: your API key (no quotes or spaces)
+3. Re-run the failed workflow after saving the secret
 
-The CI workflow passes this to the Maven plugin via `${{ secrets.NVD_API_KEY }}`.
+The Maven plugin does **not** auto-detect `NVD_API_KEY`. It is wired in `pom.xml` via `nvdApiKeyEnvironmentVariable`. The CI workflow exports the secret into that environment variable.
+
+**If you still see “An NVD API Key was not provided”:**
+
+- Confirm the secret name is exactly `NVD_API_KEY` (not `NVD_API_KEY_` or `nvd_api_key`)
+- Secrets are **not** available to workflows triggered from **fork PRs**
+- Organization secrets must allow access to this repository
 
 ---
 
