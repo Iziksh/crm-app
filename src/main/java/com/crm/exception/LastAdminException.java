@@ -1,7 +1,11 @@
 package com.crm.exception;
 
-public class LastAdminException extends Exception {
-    public LastAdminException(String message) {
-        super(message);
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(HttpStatus.CONFLICT)
+public class LastAdminException extends RuntimeException {
+    public LastAdminException() {
+        super("Cannot remove or demote the last company admin");
     }
 }
