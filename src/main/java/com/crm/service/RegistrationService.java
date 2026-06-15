@@ -54,6 +54,7 @@ public class RegistrationService {
 
         Workspace workspace = new Workspace();
         workspace.setName(companyName.trim());
+        workspace.setSlug(generateUniqueSlug(companyName.trim()));
         workspace.setCreatedBy(user);
         workspace.getMembers().add(user);
         workspace = workspaceRepository.save(workspace);
@@ -63,6 +64,16 @@ public class RegistrationService {
 
         String otp = otpService.generateAndStore(normalizedEmail);
         emailService.sendOtp(normalizedEmail, otp, locale);
+    }
+
+    private String generateUniqueSlug(String name) {
+        String base = Workspace.slugFrom(name);
+        String slug = base;
+        int n = 1;
+        while (workspaceRepository.existsBySlug(slug)) {
+            slug = base + n++;
+        }
+        return slug;
     }
 
     public User completeRegistration(String email, String otp) {

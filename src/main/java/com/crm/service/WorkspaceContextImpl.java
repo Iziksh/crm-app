@@ -6,6 +6,7 @@ import com.crm.repository.UserRepository;
 import com.crm.repository.WorkspaceRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+@Primary
 @Service
 @Transactional(readOnly = true)
 public class WorkspaceContextImpl extends WorkspaceContext {
@@ -54,8 +56,9 @@ public class WorkspaceContextImpl extends WorkspaceContext {
     @Override
     public boolean isAdmin() {
         return currentUser()
-                .map(user -> user.getRoles().contains("ROLE_ADMIN")
-                        || user.getRoles().contains("ROLE_SUPER_ADMIN"))
+                .map(user -> user.getWorkspaceId() == null &&
+                        (user.getRoles().contains("ROLE_ADMIN")
+                                || user.getRoles().contains("ROLE_SUPER_ADMIN")))
                 .orElse(false);
     }
 

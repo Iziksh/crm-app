@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -25,6 +26,12 @@ public interface ContractRepository extends JpaRepository<Contract, Long>, JpaSp
 
     @Query("SELECT c.status, COUNT(c) FROM Contract c GROUP BY c.status")
     List<Object[]> countGroupByStatus();
+
+    @Query("SELECT c.status, COUNT(c) FROM Contract c WHERE c.workspace.id IN :ids GROUP BY c.status")
+    List<Object[]> countGroupByStatusAndWorkspaceIds(@Param("ids") Collection<Long> ids);
+
+    @Query("SELECT COUNT(c) FROM Contract c WHERE c.endDate < :date AND c.workspace.id IN :ids")
+    long countByEndDateBeforeAndWorkspaceIds(@Param("date") LocalDate date, @Param("ids") Collection<Long> ids);
 
     // A-02: Active contracts expiring within warning window
     @Query("SELECT c FROM Contract c WHERE c.status = :status AND c.endDate BETWEEN :from AND :to")

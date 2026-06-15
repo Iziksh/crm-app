@@ -80,6 +80,7 @@ public class DataInitializer implements ApplicationRunner {
         if (workspaceRepository.count() == 0) {
             Workspace defaultWs = new Workspace();
             defaultWs.setName("Default");
+            defaultWs.setSlug(Workspace.slugFrom("Default"));
             defaultWs.setDescription("Default workspace");
             defaultWs.setCreatedBy(admin);
             defaultWs.getMembers().add(admin);

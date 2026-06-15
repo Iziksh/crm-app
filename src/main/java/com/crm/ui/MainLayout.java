@@ -19,8 +19,7 @@ import com.crm.service.TranslationService;
 
 import com.crm.service.UserService;
 
-import com.crm.ui.attendance.AttendanceCalendarView;
-
+import com.vaadin.flow.router.ParentLayout;
 import com.vaadin.flow.component.AttachEvent;
 
 import com.vaadin.flow.component.applayout.AppLayout;
@@ -69,8 +68,8 @@ import java.util.List;
 
 
 
+@ParentLayout(WorkspaceRouteLayout.class)
 @CssImport("./i18n.css")
-
 public class MainLayout extends AppLayout {
 
 
@@ -164,119 +163,131 @@ public class MainLayout extends AppLayout {
 
     private void createHeader() {
 
-        // ── Brand block: CRM logo + company name ─────────────────────────────
+        // ── Brand: gradient pill + app name + company ─────────────────────────
+        Div logoBox = new Div();
+        logoBox.setText("CRM");
+        logoBox.getStyle()
+                .set("background", "linear-gradient(135deg,#1565c0,#42a5f5)")
+                .set("color", "white")
+                .set("font-size", "11px")
+                .set("font-weight", "800")
+                .set("letter-spacing", "1.5px")
+                .set("padding", "5px 9px")
+                .set("border-radius", "8px")
+                .set("flex-shrink", "0");
 
-        Span logoText = new Span(i18n.translate("app.name"));
-
-        logoText.getStyle()
-
-                .set("font-size", "20px")
-
+        Span appName = new Span(i18n.translate("app.name"));
+        appName.getStyle()
+                .set("font-size", "16px")
                 .set("font-weight", "700")
-
-                .set("color", "#1565c0")
-
-                .set("letter-spacing", "1px")
-
+                .set("color", "var(--lumo-body-text-color)")
                 .set("line-height", "1.1");
 
-
+        VerticalLayout brandText = new VerticalLayout(appName);
+        brandText.setPadding(false);
+        brandText.setSpacing(false);
 
         String companyName = workspaceContext.currentUserPrimaryWorkspace()
-
                 .map(ws -> ws.getName())
-
                 .orElse(null);
-
-
-
-        Div brand = new Div();
-
-        brand.getStyle().set("display", "flex").set("flex-direction", "column").set("justify-content", "center");
-
-        brand.add(logoText);
-
-
-
         if (companyName != null) {
-
-            Span companySpan = new Span(companyName.toUpperCase());
-
-            companySpan.getStyle()
-
-                    .set("font-size", "10px")
-
+            Span co = new Span(companyName.toUpperCase());
+            co.getStyle()
+                    .set("font-size", "9px")
                     .set("font-weight", "600")
-
                     .set("color", "#90a4ae")
-
-                    .set("letter-spacing", "1.5px")
-
-                    .set("line-height", "1.1")
-
-                    .set("margin-top", "1px");
-
-            brand.add(companySpan);
-
+                    .set("letter-spacing", "1.8px");
+            brandText.add(co);
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        HorizontalLayout brand = new HorizontalLayout(logoBox, brandText);
+        brand.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
+        brand.setSpacing(false);
+        brand.getStyle().set("gap", "10px");
 
+        // ── Spacer pushes right-side controls to the edge ─────────────────────
+        Div spacer = new Div();
 
-
+        // ── User avatar chip ──────────────────────────────────────────────────
         String username = securityService.getUsername();
 
-        Span userSpan = new Span(i18n.translate("header.loggedInAs", username));
+        Div avatarCircle = new Div();
+        avatarCircle.setText(username.substring(0, 1).toUpperCase());
+        avatarCircle.getStyle()
+                .set("width", "28px").set("height", "28px")
+                .set("border-radius", "50%")
+                .set("background", "linear-gradient(135deg,#1565c0,#42a5f5)")
+                .set("color", "white")
+                .set("font-size", "12px")
+                .set("font-weight", "700")
+                .set("display", "flex")
+                .set("align-items", "center")
+                .set("justify-content", "center")
+                .set("flex-shrink", "0");
 
-        userSpan.addClassNames(LumoUtility.FontSize.SMALL, LumoUtility.TextColor.SECONDARY);
+        Span usernameSpan = new Span(username);
+        usernameSpan.getStyle()
+                .set("font-size", "13px")
+                .set("font-weight", "500")
+                .set("color", "var(--lumo-body-text-color)");
 
+        HorizontalLayout userChip = new HorizontalLayout(avatarCircle, usernameSpan);
+        userChip.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
+        userChip.setSpacing(false);
+        userChip.getStyle()
+                .set("gap", "7px")
+                .set("padding", "4px 12px 4px 5px")
+                .set("border-radius", "20px")
+                .set("border", "1px solid var(--lumo-contrast-10pct)")
+                .set("background", "var(--lumo-contrast-5pct)")
+                .set("cursor", "pointer");
 
+        com.vaadin.flow.component.html.Anchor profileLink =
+                new com.vaadin.flow.component.html.Anchor(
+                        workspaceContext.currentWorkspaceSlug() + "/my-profile");
+        profileLink.add(userChip);
+        profileLink.getStyle().set("text-decoration", "none").set("color", "inherit");
 
+        // ── Notification bell ─────────────────────────────────────────────────
         bellBadge.getElement().getThemeList().add("badge error small");
-
         bellBadge.getStyle().set("position", "absolute").set("top", "-4px").set("inset-inline-end", "-4px");
-
         bellBadge.setVisible(false);
 
-
-
         Div bellWrapper = new Div();
-
         bellWrapper.getStyle().set("position", "relative").set("display", "inline-block");
-
         bellBtn = new Button(VaadinIcon.BELL.create(), e -> openNotificationsDialog());
-
-        bellBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-
+        bellBtn.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ICON);
         bellWrapper.add(bellBtn, bellBadge);
 
-
-
+        // ── Language switcher ─────────────────────────────────────────────────
         LanguageSwitcher languageSwitcher = new LanguageSwitcher(localeService, i18n, false);
 
+        // ── Separator ─────────────────────────────────────────────────────────
+        Div sep = new Div();
+        sep.getStyle()
+                .set("width", "1px").set("height", "22px")
+                .set("background", "var(--lumo-contrast-10pct)")
+                .set("align-self", "center");
 
+        // ── Logout (icon-only) ────────────────────────────────────────────────
+        Button logout = new Button(VaadinIcon.SIGN_OUT.create(), e -> securityService.logout());
+        logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ICON);
+        logout.setTooltipText(i18n.translate("header.logout"));
+        logout.getStyle().set("color", "var(--lumo-error-color)");
 
-        Button logout = new Button(i18n.translate("header.logout"), VaadinIcon.SIGN_OUT.create(),
-
-                e -> securityService.logout());
-
-        logout.getStyle().set("margin-inline-start", "auto");
-
-
-
+        // ── Assemble ──────────────────────────────────────────────────────────
         HorizontalLayout header = new HorizontalLayout(
-
-                new DrawerToggle(), brand, userSpan, languageSwitcher, bellWrapper, logout);
-
+                new DrawerToggle(), brand, spacer,
+                profileLink, languageSwitcher, bellWrapper, sep, logout);
         header.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
-
-        header.expand(brand);
-
+        header.expand(spacer);
         header.setWidthFull();
-
-        header.addClassNames(LumoUtility.Padding.Vertical.NONE, LumoUtility.Padding.Horizontal.MEDIUM);
-
-
+        header.setSpacing(false);
+        header.getStyle()
+                .set("padding", "0 12px 0 4px")
+                .set("gap", "6px")
+                .set("box-shadow", "0 1px 4px rgba(0,0,0,.08)")
+                .set("border-bottom", "1px solid var(--lumo-contrast-10pct)");
 
         addToNavbar(header);
 
@@ -546,11 +557,13 @@ public class MainLayout extends AppLayout {
 
     private void createDrawer() {
 
+        String slug = workspaceContext.currentWorkspaceSlug();
+
         SideNav nav = new SideNav();
 
 
 
-        nav.addItem(new SideNavItem(i18n.translate("nav.dashboard"), DashboardView.class, VaadinIcon.DASHBOARD.create()));
+        nav.addItem(new SideNavItem(i18n.translate("nav.dashboard"), slug + "/dashboard", VaadinIcon.DASHBOARD.create()));
 
 
 
@@ -558,13 +571,13 @@ public class MainLayout extends AppLayout {
 
         contacts.setPrefixComponent(VaadinIcon.USERS.create());
 
-        contacts.addItem(new SideNavItem(i18n.translate("nav.accounts"), AccountsView.class, VaadinIcon.BUILDING.create()));
+        contacts.addItem(new SideNavItem(i18n.translate("nav.accounts"), slug + "/accounts", VaadinIcon.BUILDING.create()));
 
-        contacts.addItem(new SideNavItem(i18n.translate("nav.accountGroups"), AccountGroupsView.class, VaadinIcon.FOLDER.create()));
+        contacts.addItem(new SideNavItem(i18n.translate("nav.accountGroups"), slug + "/account-groups", VaadinIcon.FOLDER.create()));
 
-        contacts.addItem(new SideNavItem(i18n.translate("nav.contactsItem"), ContactsView.class, VaadinIcon.USER.create()));
+        contacts.addItem(new SideNavItem(i18n.translate("nav.contactsItem"), slug + "/contacts", VaadinIcon.USER.create()));
 
-        contacts.addItem(new SideNavItem(i18n.translate("nav.addresses"), AddressesView.class, VaadinIcon.MAP_MARKER.create()));
+        contacts.addItem(new SideNavItem(i18n.translate("nav.addresses"), slug + "/addresses", VaadinIcon.MAP_MARKER.create()));
 
         nav.addItem(contacts);
 
@@ -574,9 +587,9 @@ public class MainLayout extends AppLayout {
 
         support.setPrefixComponent(VaadinIcon.LIFEBUOY.create());
 
-        support.addItem(new SideNavItem(i18n.translate("nav.activities"), ActivitiesView.class, VaadinIcon.BUG.create()));
+        support.addItem(new SideNavItem(i18n.translate("nav.activities"), slug + "/activities", VaadinIcon.BUG.create()));
 
-        support.addItem(new SideNavItem(i18n.translate("nav.calendar"), CalendarView.class, VaadinIcon.CALENDAR.create()));
+        support.addItem(new SideNavItem(i18n.translate("nav.calendar"), slug + "/calendar", VaadinIcon.CALENDAR.create()));
 
         nav.addItem(support);
 
@@ -586,19 +599,19 @@ public class MainLayout extends AppLayout {
 
         sales.setPrefixComponent(VaadinIcon.TRENDING_UP.create());
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.leads"), LeadsView.class, VaadinIcon.CONNECT.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.leads"), slug + "/leads", VaadinIcon.CONNECT.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.opportunities"), OpportunitiesView.class, VaadinIcon.DOLLAR.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.opportunities"), slug + "/opportunities", VaadinIcon.DOLLAR.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.quotes"), QuotesView.class, VaadinIcon.INVOICE.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.quotes"), slug + "/quotes", VaadinIcon.INVOICE.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.salesOrders"), SalesOrdersView.class, VaadinIcon.PACKAGE.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.salesOrders"), slug + "/sales-orders", VaadinIcon.PACKAGE.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.contracts"), ContractsView.class, VaadinIcon.FILE_TEXT.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.contracts"), slug + "/contracts", VaadinIcon.FILE_TEXT.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.forecast"), ForecastView.class, VaadinIcon.CHART.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.forecast"), slug + "/forecast", VaadinIcon.CHART.create()));
 
-        sales.addItem(new SideNavItem(i18n.translate("nav.products"), ProductsView.class, VaadinIcon.CART.create()));
+        sales.addItem(new SideNavItem(i18n.translate("nav.products"), slug + "/products", VaadinIcon.CART.create()));
 
         nav.addItem(sales);
 
@@ -608,21 +621,23 @@ public class MainLayout extends AppLayout {
 
         settings.setPrefixComponent(VaadinIcon.COG.create());
 
-        settings.addItem(new SideNavItem(i18n.translate("nav.workspaces"), WorkspacesView.class, VaadinIcon.GROUP.create()));
+        settings.addItem(new SideNavItem(i18n.translate("nav.myProfile"), slug + "/my-profile", VaadinIcon.USER_CARD.create()));
 
-        settings.addItem(new SideNavItem(i18n.translate("nav.savedSearches"), SavedSearchesView.class, VaadinIcon.SEARCH.create()));
+        settings.addItem(new SideNavItem(i18n.translate("nav.workspaces"), slug + "/workspaces", VaadinIcon.GROUP.create()));
 
-        settings.addItem(new SideNavItem(i18n.translate("nav.subscriptions"), SubscriptionsView.class, VaadinIcon.BELL.create()));
+        settings.addItem(new SideNavItem(i18n.translate("nav.savedSearches"), slug + "/saved-searches", VaadinIcon.SEARCH.create()));
+
+        settings.addItem(new SideNavItem(i18n.translate("nav.subscriptions"), slug + "/subscriptions", VaadinIcon.BELL.create()));
 
         if (securityService.hasRole("ADMIN") || securityService.hasRole("COMPANY_ADMIN") || securityService.hasRole("SUPER_ADMIN")) {
 
-            settings.addItem(new SideNavItem(i18n.translate("nav.users"), UsersView.class, VaadinIcon.USERS.create()));
+            settings.addItem(new SideNavItem(i18n.translate("nav.users"), slug + "/users", VaadinIcon.USERS.create()));
 
         }
 
         if (securityService.hasRole("ADMIN")) {
 
-            settings.addItem(new SideNavItem(i18n.translate("nav.taskQueue"), ScheduledTasksView.class, VaadinIcon.TIMER.create()));
+            settings.addItem(new SideNavItem(i18n.translate("nav.taskQueue"), slug + "/scheduled-tasks", VaadinIcon.TIMER.create()));
 
         }
 
@@ -634,13 +649,13 @@ public class MainLayout extends AppLayout {
 
         hr.setPrefixComponent(VaadinIcon.CLOCK.create());
 
-        hr.addItem(new SideNavItem(i18n.translate("nav.timeClock"), TimeClockView.class, VaadinIcon.CLOCK.create()));
+        hr.addItem(new SideNavItem(i18n.translate("nav.timeClock"), slug + "/time-clock", VaadinIcon.CLOCK.create()));
 
-        hr.addItem(new SideNavItem(i18n.translate("nav.attendanceCalendar"), AttendanceCalendarView.class, VaadinIcon.CALENDAR.create()));
+        hr.addItem(new SideNavItem(i18n.translate("nav.attendanceCalendar"), slug + "/attendance-calendar", VaadinIcon.CALENDAR.create()));
 
         if (securityService.hasRole("ADMIN")) {
 
-            hr.addItem(new SideNavItem(i18n.translate("nav.corrections"), AttendanceCorrectionView.class, VaadinIcon.CHECK_CIRCLE.create()));
+            hr.addItem(new SideNavItem(i18n.translate("nav.corrections"), slug + "/attendance-corrections", VaadinIcon.CHECK_CIRCLE.create()));
 
         }
 

@@ -8,6 +8,7 @@ import java.util.List;
 public record WorkspaceResponse(
         Long id,
         String name,
+        String slug,
         String description,
         int memberCount,
         List<String> memberNames,
@@ -17,6 +18,7 @@ public record WorkspaceResponse(
         return new WorkspaceResponse(
                 w.getId(),
                 w.getName(),
+                w.getSlug(),
                 w.getDescription(),
                 w.getMembers().size(),
                 w.getMembers().stream().map(u -> u.getUsername()).toList(),
