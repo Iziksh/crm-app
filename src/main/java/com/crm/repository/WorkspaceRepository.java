@@ -10,4 +10,5 @@ import java.util.List;
 public interface WorkspaceRepository extends JpaRepository<Workspace, Long> {
     List<Workspace> findByMembers_Id(Long userId);
     boolean existsByName(String name);
+    boolean existsBySlug(String slug);
 }

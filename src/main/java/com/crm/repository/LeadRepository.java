@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -25,6 +26,9 @@ public interface LeadRepository extends JpaRepository<Lead, Long>, JpaSpecificat
 
     @Query("SELECT l.status, COUNT(l) FROM Lead l GROUP BY l.status")
     List<Object[]> countGroupByStatus();
+
+    @Query("SELECT l.status, COUNT(l) FROM Lead l WHERE l.workspace.id IN :ids GROUP BY l.status")
+    List<Object[]> countGroupByStatusAndWorkspaceIds(@Param("ids") Collection<Long> ids);
 
     // L-02: Unassigned leads created before cutoff, not in terminal status
     @Query("SELECT l FROM Lead l WHERE l.assignedTo IS NULL AND l.status NOT IN :excluded AND l.createdAt <= :cutoff")

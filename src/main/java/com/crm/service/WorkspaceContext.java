@@ -22,14 +22,14 @@ public class WorkspaceContext {
         this.workspaceRepository = workspaceRepository;
     }
 
-    // Checks the stored roles in DB — not the expanded hierarchy authorities.
-    // COMPANY_ADMIN is workspace-scoped even though hierarchy gives them ROLE_ADMIN permissions.
-    // Only ROLE_ADMIN (legacy global admin) and ROLE_SUPER_ADMIN bypass workspace filtering.
+    // Checks stored roles + workspace assignment. A user with a workspaceId is always
+    // workspace-scoped — only unassigned ROLE_ADMIN / ROLE_SUPER_ADMIN accounts are global.
     public boolean isAdmin() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || "anonymousUser".equals(auth.getPrincipal())) return false;
         return userRepository.findByUsername(auth.getName())
-                .map(u -> u.getRoles().contains("ROLE_ADMIN") || u.getRoles().contains("ROLE_SUPER_ADMIN"))
+                .map(u -> u.getWorkspaceId() == null &&
+                        (u.getRoles().contains("ROLE_ADMIN") || u.getRoles().contains("ROLE_SUPER_ADMIN")))
                 .orElse(false);
     }
 
@@ -43,6 +43,13 @@ public class WorkspaceContext {
                 .map(u -> workspaceRepository.findByMembers_Id(u.getId())
                         .stream().map(Workspace::getId).toList())
                 .orElse(List.of());
+    }
+
+    public String currentWorkspaceSlug() {
+        if (isAdmin()) return "all";
+        return currentUserPrimaryWorkspace()
+                .map(Workspace::getSlug)
+                .orElse("all");
     }
 
     @Transactional(readOnly = true)

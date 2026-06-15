@@ -14,6 +14,7 @@ import org.springframework.data.repository.query.Param;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -28,8 +29,14 @@ public interface OpportunityRepository extends JpaRepository<Opportunity, Long>,
     @Query("SELECT o.stage, COUNT(o) FROM Opportunity o GROUP BY o.stage")
     List<Object[]> countGroupByStage();
 
+    @Query("SELECT o.stage, COUNT(o) FROM Opportunity o WHERE o.workspace.id IN :ids GROUP BY o.stage")
+    List<Object[]> countGroupByStageAndWorkspaceIds(@Param("ids") Collection<Long> ids);
+
     @Query("SELECT SUM(o.amount) FROM Opportunity o WHERE o.stage != 'LOST'")
     BigDecimal sumPipelineAmount();
+
+    @Query("SELECT SUM(o.amount) FROM Opportunity o WHERE o.stage != 'LOST' AND o.workspace.id IN :ids")
+    BigDecimal sumPipelineAmountByWorkspaceIds(@Param("ids") Collection<Long> ids);
 
     // O-05: Stagnant deals not updated in N days
     @Query("SELECT o FROM Opportunity o WHERE o.stage NOT IN :excluded AND o.updatedAt <= :cutoff AND o.assignedTo IS NOT NULL")

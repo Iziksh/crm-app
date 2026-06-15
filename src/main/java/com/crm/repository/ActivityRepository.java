@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -23,6 +24,9 @@ public interface ActivityRepository extends JpaRepository<Activity, Long>, JpaSp
 
     @Query("SELECT a.status, COUNT(a) FROM Activity a GROUP BY a.status")
     List<Object[]> countGroupByStatus();
+
+    @Query("SELECT a.status, COUNT(a) FROM Activity a WHERE a.workspace.id IN :ids GROUP BY a.status")
+    List<Object[]> countGroupByStatusAndWorkspaceIds(@Param("ids") Collection<Long> ids);
 
     // T-02: Activities due on a specific date, not resolved
     @Query("SELECT a FROM Activity a WHERE a.dueDate = :dueDate AND a.status NOT IN :excluded AND a.assignedTo IS NOT NULL")

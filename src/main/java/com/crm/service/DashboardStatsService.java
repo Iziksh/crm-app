@@ -23,11 +23,12 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 public class DashboardStatsService {
 
-    private static final String CACHE_KEY = "global";
+    private static final String ADMIN_CACHE_KEY = "global";
 
     private final AccountRepository accountRepository;
     private final ContactRepository contactRepository;
@@ -35,6 +36,7 @@ public class DashboardStatsService {
     private final LeadRepository leadRepository;
     private final ActivityRepository activityRepository;
     private final ContractRepository contractRepository;
+    private final WorkspaceContext workspaceContext;
     private final Cache<String, DashboardStats> cache;
 
     public DashboardStatsService(AccountRepository accountRepository,
@@ -43,6 +45,7 @@ public class DashboardStatsService {
                                  LeadRepository leadRepository,
                                  ActivityRepository activityRepository,
                                  ContractRepository contractRepository,
+                                 WorkspaceContext workspaceContext,
                                  @Value("${app.dashboard.cache-ttl-seconds:45}") int cacheTtlSeconds) {
         this.accountRepository = accountRepository;
         this.contactRepository = contactRepository;
@@ -50,15 +53,24 @@ public class DashboardStatsService {
         this.leadRepository = leadRepository;
         this.activityRepository = activityRepository;
         this.contractRepository = contractRepository;
+        this.workspaceContext = workspaceContext;
         this.cache = Caffeine.newBuilder()
                 .expireAfterWrite(cacheTtlSeconds, TimeUnit.SECONDS)
-                .maximumSize(1)
+                .maximumSize(200)
                 .build();
     }
 
     @Transactional(readOnly = true)
     public DashboardStats getStats() {
-        return cache.get(CACHE_KEY, key -> loadStats());
+        if (workspaceContext.isAdmin()) {
+            return cache.get(ADMIN_CACHE_KEY, key -> loadGlobalStats());
+        }
+        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
+        if (wsIds.isEmpty()) {
+            return emptyStats();
+        }
+        String cacheKey = wsIds.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
+        return cache.get(cacheKey, key -> loadScopedStats(wsIds));
     }
 
     public void invalidateCache() {
@@ -67,6 +79,10 @@ public class DashboardStatsService {
 
     @Transactional(readOnly = true)
     public DashboardStats loadStats() {
+        return loadGlobalStats();
+    }
+
+    private DashboardStats loadGlobalStats() {
         return new DashboardStats(
                 accountRepository.count(),
                 contactRepository.count(),
@@ -76,6 +92,29 @@ public class DashboardStatsService {
                 toEnumMap(leadRepository.countGroupByStatus(), LeadStatus.class),
                 toEnumMap(activityRepository.countGroupByStatus(), ActivityStatus.class),
                 toEnumMap(contractRepository.countGroupByStatus(), ContractStatus.class)
+        );
+    }
+
+    private DashboardStats loadScopedStats(List<Long> wsIds) {
+        return new DashboardStats(
+                accountRepository.countByWorkspace_IdIn(wsIds),
+                contactRepository.countByWorkspace_IdIn(wsIds),
+                nullToZero(opportunityRepository.sumPipelineAmountByWorkspaceIds(wsIds)),
+                contractRepository.countByEndDateBeforeAndWorkspaceIds(LocalDate.now().plusDays(30), wsIds),
+                toEnumMap(opportunityRepository.countGroupByStageAndWorkspaceIds(wsIds), OpportunityStage.class),
+                toEnumMap(leadRepository.countGroupByStatusAndWorkspaceIds(wsIds), LeadStatus.class),
+                toEnumMap(activityRepository.countGroupByStatusAndWorkspaceIds(wsIds), ActivityStatus.class),
+                toEnumMap(contractRepository.countGroupByStatusAndWorkspaceIds(wsIds), ContractStatus.class)
+        );
+    }
+
+    private static DashboardStats emptyStats() {
+        return new DashboardStats(
+                0L, 0L, BigDecimal.ZERO, 0L,
+                emptyEnumMap(OpportunityStage.class),
+                emptyEnumMap(LeadStatus.class),
+                emptyEnumMap(ActivityStatus.class),
+                emptyEnumMap(ContractStatus.class)
         );
     }
 
@@ -92,6 +131,14 @@ public class DashboardStatsService {
             @SuppressWarnings("unchecked")
             E key = (E) row[0];
             map.put(key, (Long) row[1]);
+        }
+        return map;
+    }
+
+    private static <E extends Enum<E>> Map<E, Long> emptyEnumMap(Class<E> enumType) {
+        Map<E, Long> map = new EnumMap<>(enumType);
+        for (E constant : enumType.getEnumConstants()) {
+            map.put(constant, 0L);
         }
         return map;
     }

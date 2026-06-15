@@ -26,12 +26,23 @@ public class WorkspaceService {
     public WorkspaceResponse create(WorkspaceRequest request, String createdByUsername) {
         Workspace ws = new Workspace();
         ws.setName(request.name());
+        ws.setSlug(generateUniqueSlug(request.name()));
         ws.setDescription(request.description());
         userRepository.findByUsername(createdByUsername).ifPresent(user -> {
             ws.setCreatedBy(user);
             ws.getMembers().add(user);
         });
         return WorkspaceResponse.from(workspaceRepository.save(ws));
+    }
+
+    private String generateUniqueSlug(String name) {
+        String base = Workspace.slugFrom(name);
+        String slug = base;
+        int n = 1;
+        while (workspaceRepository.existsBySlug(slug)) {
+            slug = base + n++;
+        }
+        return slug;
     }
 
     @Transactional(readOnly = true)

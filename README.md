@@ -4722,6 +4722,249 @@ In development (`ddl-auto=update`) Hibernate creates the table automatically. Fl
 
 ---
 
+### Phase H — Multi-Tenant URL Routing ✅ COMPLETE (built)
+
+Adds workspace-scoped URL routing so every view lives under a company-specific slug:
+
+- Regular users: `http://localhost:9080/crmltd/contacts`
+- Super-admin users: `http://localhost:9080/all/contacts`
+- Root `/` redirects to `/{slug}/dashboard`
+
+#### BE Step H.1 — Workspace slug field
+
+**`domain/entity/Workspace.java`**
+```java
+@Column(unique = true, nullable = false)
+private String slug;
+
+public static String slugFrom(String name) {
+    String s = name.toLowerCase().replaceAll("[^a-z0-9]", "");
+    return s.isEmpty() ? "workspace" : s;
+}
+```
+Add getter/setter for `slug`.
+
+#### BE Step H.2 — Flyway migration `V2.9.0__add_workspace_slug.sql`
+
+```sql
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS slug VARCHAR(100);
+
+UPDATE workspaces SET slug = LOWER(REGEXP_REPLACE(name, '[^a-zA-Z0-9]', '', 'g'));
+UPDATE workspaces SET slug = 'workspace' WHERE slug = '' OR slug IS NULL;
+
+-- resolve duplicates by appending id
+WITH ranked AS (
+    SELECT id, slug, ROW_NUMBER() OVER (PARTITION BY slug ORDER BY id) AS rn FROM workspaces
+)
+UPDATE workspaces w SET slug = r.slug || w.id::TEXT
+FROM ranked r WHERE w.id = r.id AND r.rn > 1;
+
+ALTER TABLE workspaces ALTER COLUMN slug SET NOT NULL;
+ALTER TABLE workspaces ADD CONSTRAINT workspaces_slug_unique UNIQUE (slug);
+CREATE INDEX IF NOT EXISTS idx_workspaces_slug ON workspaces(slug);
+```
+
+#### BE Step H.3 — Slug generation in services
+
+**`WorkspaceRepository.java`**: add `boolean existsBySlug(String slug);`
+
+**`WorkspaceService.create()`**: call `ws.setSlug(generateUniqueSlug(request.name()));`
+
+**`RegistrationService`**: call `workspace.setSlug(generateUniqueSlug(companyName.trim()));` before saving
+
+**`DataInitializer`**: `defaultWs.setSlug(Workspace.slugFrom("Default"));` → produces `"default"`
+
+All three share the same private helper:
+```java
+private String generateUniqueSlug(String name) {
+    String base = Workspace.slugFrom(name);
+    String slug = base;
+    int i = 2;
+    while (workspaceRepository.existsBySlug(slug)) slug = base + i++;
+    return slug;
+}
+```
+
+#### BE Step H.4 — `WorkspaceContext.currentWorkspaceSlug()`
+
+**`WorkspaceContext.java`** (interface + `WorkspaceContextImpl`):
+```java
+default String currentWorkspaceSlug() {
+    if (isAdmin()) return "all";
+    return currentUserPrimaryWorkspace()
+            .map(Workspace::getSlug)
+            .orElse("all");
+}
+```
+
+#### FE Step H.5 — `WorkspaceRouteLayout`
+
+**`ui/WorkspaceRouteLayout.java`** — outer layout contributing `/:workspaceSlug` URL prefix to all authenticated views. Key details:
+- `@RoutePrefix(":workspaceSlug")` (NOT `@Route`) — contributes a URL segment to child routes
+- `@PermitAll`, implements `RouterLayout` + `BeforeEnterObserver`
+- `setSizeFull()` in constructor — required to maintain the height chain for grid scrolling
+- `beforeEnter()` validates the URL slug against `workspaceContext.currentWorkspaceSlug()` and redirects on mismatch
+
+```java
+@RoutePrefix(":workspaceSlug")
+@PermitAll
+public class WorkspaceRouteLayout extends Div implements RouterLayout, BeforeEnterObserver {
+    @Override
+    public void beforeEnter(BeforeEnterEvent event) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) return;
+        String urlSlug = event.getRouteParameters().get("workspaceSlug").orElse("");
+        String expectedSlug = workspaceContext.currentWorkspaceSlug();
+        if (!expectedSlug.equals(urlSlug)) {
+            String path = event.getLocation().getPath();
+            String viewPath = path.contains("/") ? path.substring(path.indexOf('/') + 1) : "dashboard";
+            event.forwardTo(expectedSlug + "/" + viewPath);
+        }
+    }
+}
+```
+
+#### FE Step H.6 — Wire `MainLayout` to `WorkspaceRouteLayout`
+
+Add to **`MainLayout`**:
+```java
+@ParentLayout(WorkspaceRouteLayout.class)
+public class MainLayout extends AppLayout implements RouterLayout { ... }
+```
+
+All `SideNavItem` references must use explicit string paths instead of class references, because Vaadin cannot auto-resolve parameterised parent routes:
+```java
+String slug = workspaceContext.currentWorkspaceSlug();
+new SideNavItem("Dashboard", slug + "/dashboard", VaadinIcon.DASHBOARD.create())
+```
+
+#### FE Step H.7 — `RootRedirectView`
+
+**`ui/RootRedirectView.java`** — handles root URL `/`:
+```java
+@Route("")
+@AnonymousAllowed
+public class RootRedirectView extends Div implements BeforeEnterObserver {
+    @Override
+    public void beforeEnter(BeforeEnterEvent event) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            event.forwardTo("login"); return;
+        }
+        event.forwardTo(workspaceContext.currentWorkspaceSlug() + "/dashboard");
+    }
+}
+```
+
+Also remove `@RouteAlias(value = "")` from `DashboardView` — it is superseded by this redirect.
+
+#### Verification Phase H
+
+1. Log in as a regular user → browser URL becomes `/{companySlug}/dashboard`
+2. Log in as super-admin → browser URL becomes `/all/dashboard`
+3. Manually navigate to `/{wrongSlug}/contacts` → auto-redirects to the correct slug
+4. Navigate to `/` while logged in → redirects to `/{slug}/dashboard`
+5. Navigate to `/` while logged out → redirects to `/login`
+6. Create a new workspace via registration → verify slug is auto-generated and unique
+7. Confirm all nav items in the sidebar produce correct `/{slug}/{view}` URLs
+8. Verify grids remain scrollable (height chain maintained by `setSizeFull()` in `WorkspaceRouteLayout`)
+
+---
+
+### Phase I — My Profile View ✅ COMPLETE (built)
+
+Adds a user profile page at `/{slug}/my-profile` showing the logged-in user's details and roles.
+
+#### FE Step I.1 — `MyProfileView`
+
+**`ui/MyProfileView.java`**
+```
+@Route(value = "my-profile", layout = MainLayout.class)
+@PermitAll
+extends VerticalLayout implements HasDynamicTitle
+```
+
+Layout:
+- **Card** (white/base-color, rounded, shadow): max 560 px wide, centred on page
+- **Header row**: 72 px gradient avatar circle (first letter of username) + username `H2` + status badge (green=ACTIVE, red=DISABLED)
+- **Divider**
+- **Info rows** with icon + label + value: Email (`ENVELOPE`), Workspace name + slug (`BUILDING`), Member Since date (`CALENDAR`)
+- **Roles section**: colour-coded Vaadin badges
+
+Role badge themes:
+| Role | Badge theme |
+|---|---|
+| SUPER_ADMIN | `badge error` |
+| COMPANY_ADMIN | `badge contrast` |
+| ADMIN | `badge` |
+| SALES | `badge success` |
+| SUPPORT | `badge` |
+| USER | `badge contrast` |
+
+Uses `UserRepository.findByUsername()` with the authenticated username from `SecurityContextHolder`.
+
+#### FE Step I.2 — Navigation entry
+
+Added to **`MainLayout.createDrawer()`** Settings section:
+```java
+new SideNavItem(i18n.translate("nav.myProfile"), slug + "/my-profile", VaadinIcon.USER_CARD.create())
+```
+
+Added to `messages.properties`:
+```
+nav.myProfile=My Profile
+```
+Added to `messages_he.properties`:
+```
+nav.myProfile=הפרופיל שלי
+```
+
+#### Verification Phase I
+
+1. Click "My Profile" in the sidebar → view opens at `/{slug}/my-profile`
+2. Verify avatar shows first letter of username, email, workspace name, member-since date
+3. Verify status badge is green for active user, red for disabled
+4. Verify role badges render with correct colours
+5. Confirm page title is "My Profile"
+
+---
+
+### Phase J — Header Redesign ✅ COMPLETE (built)
+
+Replaced the default Vaadin app-layout navbar with a modern, branded header.
+
+#### FE Step J.1 — `MainLayout.createHeader()` redesign
+
+**Layout (left → right):**
+
+1. **Brand pill** — gradient `#1565c0 → #42a5f5` background, `8 × 28 px` pill shape, white bold "CRM" text + `Span` with app name below and company name in secondary colour
+2. **Spacer `Div`** — `flex-grow: 1` pushes right-side actions to the far right
+3. **Language switcher** — existing `LanguageSwitcher` component, unchanged
+4. **Notification bell** — `VaadinIcon.BELL`, `LUMO_TERTIARY` + `LUMO_ICON` variants
+5. **Vertical separator** — 1 px, `24 px` tall, `var(--lumo-contrast-20pct)` colour
+6. **User avatar chip** — 32 px circle (gradient) + username text, pill border `1px solid var(--lumo-contrast-20pct)`, wrapped in `Anchor` → `/{slug}/my-profile`
+7. **Logout button** — icon-only (`SIGN_OUT`), red colour (`var(--lumo-error-color)`), `setTooltipText("Logout")`, no visible label
+
+**Header container styles:**
+```java
+header.getStyle()
+    .set("gap", "6px")
+    .set("box-shadow", "0 1px 4px rgba(0,0,0,.08)")
+    .set("border-bottom", "1px solid var(--lumo-contrast-10pct)")
+    .set("padding", "0 16px");
+```
+
+#### Verification Phase J
+
+1. Confirm brand pill is visible with gradient background and "CRM" text
+2. Confirm company name appears below the app name in the brand block
+3. Confirm username chip links to `/{slug}/my-profile`
+4. Confirm logout button shows tooltip "Logout" on hover and has no visible label
+5. Confirm notification bell is present
+6. Confirm header casts a subtle drop shadow
+
+---
+
 #### Coexistence with Phase C Punch-In/Out Clock
 
 | Concern | Phase C -- Clock | Phase F -- Manual Reports |

@@ -21,6 +21,9 @@ public class Workspace {
     @Column(nullable = false)
     private String name;
 
+    @Column(unique = true, nullable = false)
+    private String slug;
+
     @Column(columnDefinition = "TEXT")
     private String description;
 
@@ -47,6 +50,13 @@ public class Workspace {
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getSlug() { return slug; }
+    public void setSlug(String slug) { this.slug = slug; }
+
+    public static String slugFrom(String name) {
+        String s = name.toLowerCase().replaceAll("[^a-z0-9]", "");
+        return s.isEmpty() ? "workspace" : s;
+    }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
     public User getCreatedBy() { return createdBy; }
