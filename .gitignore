@@ -35,3 +35,19 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json
+
+# Build output capture files
+build-out.txt
+build-prod.cmd
+build-stderr.txt
+build-stdout.txt
+compile-out.txt
+compile-stderr.txt
+compile-stdout.txt
+dir-err.txt
+dir-out.txt
+test-err.txt
+test-out.txt
