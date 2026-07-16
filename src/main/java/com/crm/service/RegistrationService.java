@@ -76,6 +76,12 @@ public class RegistrationService {
         return slug;
     }
 
+    public void resendOtp(String email, Locale locale) {
+        String normalizedEmail = email.toLowerCase(Locale.ROOT);
+        String otp = otpService.generateAndStore(normalizedEmail);
+        emailService.sendOtp(normalizedEmail, otp, locale);
+    }
+
     public User completeRegistration(String email, String otp) {
         String normalizedEmail = email.toLowerCase(Locale.ROOT);
         if (!otpService.validate(normalizedEmail, otp)) {

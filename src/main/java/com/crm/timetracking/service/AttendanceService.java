@@ -89,6 +89,35 @@ public class AttendanceService {
                 AttendanceApprovalStatus.PENDING);
     }
 
+    /** Returns sessions awaiting approval, restricted to the given set of employee ids. */
+    @Transactional(readOnly = true)
+    public List<Attendance> getPendingApprovalsForUsers(List<Long> userIds) {
+        if (userIds.isEmpty()) return List.of();
+        return attendanceRepo.findByApprovalStatusAndUserIdInOrderByStartTimeAsc(
+                AttendanceApprovalStatus.PENDING, userIds);
+    }
+
+    /**
+     * Full correction history for the Correction Log — any status, optional date range and
+     * status filter. {@code userIds == null} means unrestricted (admin/HR view of everyone).
+     */
+    @Transactional(readOnly = true)
+    public List<Attendance> searchCorrections(List<Long> userIds, OffsetDateTime from, OffsetDateTime to,
+                                              AttendanceApprovalStatus status) {
+        boolean hasFrom = from != null;
+        boolean hasTo = to != null;
+        boolean hasStatus = status != null;
+        return userIds == null
+                ? attendanceRepo.searchAllCorrections(hasFrom, from, hasTo, to, hasStatus, status)
+                : attendanceRepo.searchCorrectionsForUsers(userIds, hasFrom, from, hasTo, to, hasStatus, status);
+    }
+
+    @Transactional(readOnly = true)
+    public Attendance getById(Long id) {
+        return attendanceRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Attendance record " + id + " not found"));
+    }
+
     /**
      * Manager approves a manual correction. The session now counts toward
      * monthly totals identically to a normal punch session.

@@ -3,10 +3,13 @@ package com.crm.ui;
 
 
 import com.crm.config.performance.StartupPerformanceProfiler;
+import com.crm.dto.response.AccountResponse;
 import com.crm.dto.response.AlertResponse;
 
 import com.crm.dto.response.UserSummaryResponse;
 
+import com.crm.service.AccountService;
+import com.crm.service.AddonService;
 import com.crm.service.AlertService;
 
 import com.crm.service.WorkspaceContext;
@@ -82,6 +85,10 @@ public class MainLayout extends AppLayout {
 
     private final UserService userService;
 
+    private final AccountService accountService;
+
+    private final AddonService addonService;
+
     private final WorkspaceContext workspaceContext;
 
     private final LocaleService localeService;
@@ -98,6 +105,10 @@ public class MainLayout extends AppLayout {
 
                       NotificationService notificationService, UserService userService,
 
+                      AccountService accountService,
+
+                      AddonService addonService,
+
                       WorkspaceContext workspaceContext,
 
                       LocaleService localeService, TranslationService i18n) {
@@ -109,6 +120,10 @@ public class MainLayout extends AppLayout {
         this.notificationService = notificationService;
 
         this.userService = userService;
+
+        this.accountService = accountService;
+
+        this.addonService = addonService;
 
         this.workspaceContext = workspaceContext;
 
@@ -262,6 +277,52 @@ public class MainLayout extends AppLayout {
         // ── Language switcher ─────────────────────────────────────────────────
         LanguageSwitcher languageSwitcher = new LanguageSwitcher(localeService, i18n, false);
 
+        // ── Admin account selector ─────────────────────────────────────────────
+        boolean isAdmin = securityService.hasRole("SUPER_ADMIN")
+                || securityService.hasRole("ADMIN")
+                || securityService.hasRole("COMPANY_ADMIN");
+
+        HorizontalLayout accountSelectorArea = new HorizontalLayout();
+        accountSelectorArea.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
+        accountSelectorArea.setSpacing(false);
+        accountSelectorArea.getStyle().set("gap", "6px");
+
+        if (isAdmin) {
+            java.util.List<AccountResponse> allAccounts = accountService.findAllForExport("");
+
+            Span accountBadge = new Span(i18n.translate("header.selectAccount"));
+            accountBadge.getElement().getThemeList().add("badge primary");
+            accountBadge.getStyle().set("cursor", "pointer").set("font-size", "12px");
+
+            ComboBox<AccountResponse> accountPicker = new ComboBox<>();
+            accountPicker.setItems(allAccounts);
+            accountPicker.setItemLabelGenerator(AccountResponse::name);
+            accountPicker.setClearButtonVisible(true);
+            accountPicker.setWidth("190px");
+            accountPicker.getStyle().set("display", "none");
+
+            accountBadge.addClickListener(e -> {
+                accountBadge.getStyle().set("display", "none");
+                accountPicker.getStyle().remove("display");
+                accountPicker.focus();
+            });
+
+            accountPicker.addValueChangeListener(e -> {
+                AccountResponse selected = e.getValue();
+                if (selected != null) {
+                    accountBadge.setText(selected.name());
+                } else {
+                    accountBadge.setText(i18n.translate("header.selectAccount"));
+                }
+                accountBadge.getStyle().remove("display");
+                accountPicker.getStyle().set("display", "none");
+                com.vaadin.flow.server.VaadinSession.getCurrent()
+                        .setAttribute("adminSelectedAccountId", selected != null ? selected.id() : null);
+            });
+
+            accountSelectorArea.add(accountBadge, accountPicker);
+        }
+
         // ── Separator ─────────────────────────────────────────────────────────
         Div sep = new Div();
         sep.getStyle()
@@ -278,7 +339,7 @@ public class MainLayout extends AppLayout {
         // ── Assemble ──────────────────────────────────────────────────────────
         HorizontalLayout header = new HorizontalLayout(
                 new DrawerToggle(), brand, spacer,
-                profileLink, languageSwitcher, bellWrapper, sep, logout);
+                profileLink, accountSelectorArea, languageSwitcher, bellWrapper, sep, logout);
         header.setDefaultVerticalComponentAlignment(FlexComponent.Alignment.CENTER);
         header.expand(spacer);
         header.setWidthFull();
@@ -645,21 +706,46 @@ public class MainLayout extends AppLayout {
 
 
 
-        SideNavItem hr = new SideNavItem(i18n.translate("nav.hr"));
+        boolean isAdminUser = securityService.hasRole("SUPER_ADMIN") || securityService.hasRole("ADMIN");
+        Long navAccountId = isAdminUser ? null :
+                userService.getAccountIdByUsername(securityService.getUsername()).orElse(null);
+        boolean hasTimeClock = isAdminUser || addonService.accountHasActiveAddon(navAccountId, "Time Clock");
 
-        hr.setPrefixComponent(VaadinIcon.CLOCK.create());
+        if (hasTimeClock) {
 
-        hr.addItem(new SideNavItem(i18n.translate("nav.timeClock"), slug + "/time-clock", VaadinIcon.CLOCK.create()));
+            SideNavItem hr = new SideNavItem(i18n.translate("nav.hr"));
 
-        hr.addItem(new SideNavItem(i18n.translate("nav.attendanceCalendar"), slug + "/attendance-calendar", VaadinIcon.CALENDAR.create()));
+            hr.setPrefixComponent(VaadinIcon.CLOCK.create());
 
-        if (securityService.hasRole("ADMIN")) {
+            hr.addItem(new SideNavItem(i18n.translate("nav.timeClock"), slug + "/time-clock", VaadinIcon.CLOCK.create()));
 
-            hr.addItem(new SideNavItem(i18n.translate("nav.corrections"), slug + "/attendance-corrections", VaadinIcon.CHECK_CIRCLE.create()));
+            hr.addItem(new SideNavItem(i18n.translate("nav.attendanceCalendar"), slug + "/attendance-calendar", VaadinIcon.CALENDAR.create()));
+
+            if (securityService.hasRole("ADMIN")) {
+
+                hr.addItem(new SideNavItem(i18n.translate("nav.corrections"), slug + "/attendance-corrections", VaadinIcon.CHECK_CIRCLE.create()));
+
+            }
+
+            nav.addItem(hr);
 
         }
 
-        nav.addItem(hr);
+        boolean hasBillingDocuments = isAdminUser || addonService.accountHasActiveAddon(navAccountId, "Billing & Documents");
+
+        if (hasBillingDocuments) {
+
+            SideNavItem billing = new SideNavItem(i18n.translate("nav.billing"));
+
+            billing.setPrefixComponent(VaadinIcon.INVOICE.create());
+
+            billing.addItem(new SideNavItem(i18n.translate("nav.paymentRequests"), slug + "/payment-requests", VaadinIcon.INVOICE.create()));
+
+            billing.addItem(new SideNavItem(i18n.translate("nav.taxDocuments"), slug + "/tax-documents", VaadinIcon.FILE_TEXT.create()));
+
+            nav.addItem(billing);
+
+        }
 
 
 

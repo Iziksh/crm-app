@@ -87,8 +87,26 @@ public class DataInitializer implements ApplicationRunner {
             workspaceRepository.save(defaultWs);
         }
 
+        // Keep User.workspaceId (scalar FK used by workspace-scoped admin endpoints) consistent with
+        // the Workspace.members collection — both represent the same membership. Runs on every
+        // startup (not just first-run seeding), so it also heals any account whose membership was
+        // established via WorkspaceService.addMember() before that method set workspaceId too.
+        // SUPER_ADMIN accounts are skipped: null workspaceId is their intentional "operates across
+        // all workspaces" state (see User.workspaceId javadoc), not a data gap to fix.
+        backfillMissingPrimaryWorkspace();
+
         StartupPerformanceProfiler.time("phase.data-initializer.topics", this::seedTopics);
         StartupPerformanceProfiler.time("phase.data-initializer.notification-configs", this::seedNotificationConfigs);
+    }
+
+    private void backfillMissingPrimaryWorkspace() {
+        for (User user : userRepository.findByWorkspaceIdIsNull()) {
+            if (user.getRoles() != null && user.getRoles().contains("ROLE_SUPER_ADMIN")) continue;
+            workspaceRepository.findByMembers_Id(user.getId()).stream().findFirst().ifPresent(ws -> {
+                user.setWorkspaceId(ws.getId());
+                userRepository.save(user);
+            });
+        }
     }
 
     private User syncConfiguredEmail(String username, String targetEmail) {

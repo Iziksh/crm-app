@@ -1,6 +1,7 @@
 package com.crm.timetracking.entity;
 
 import com.crm.timetracking.enums.AttendanceReportType;
+import com.crm.timetracking.enums.WorkType;
 import jakarta.persistence.*;
 
 import java.time.LocalDate;
@@ -48,6 +49,16 @@ public class AttendanceReport {
     @Column(name = "equate_to_standard", nullable = false)
     private boolean equateToStandard = false;
 
+    // Where/how PRESENCE hours were worked. Null for non-PRESENCE report types.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "work_type", length = 32)
+    private WorkType workType;
+
+    // Free-text project/cost-center tag for internal control purposes — no formal Project
+    // entity exists in this CRM, so this mirrors the Contact.company pattern (a lightweight tag).
+    @Column(name = "project_tag")
+    private String projectTag;
+
     @Column(name = "created_at", nullable = false, updatable = false,
             columnDefinition = "TIMESTAMP WITH TIME ZONE")
     private OffsetDateTime createdAt;
@@ -73,6 +84,8 @@ public class AttendanceReport {
     public String getNote()                    { return note; }
     public AttendanceReportType getReportType(){ return reportType; }
     public boolean isEquateToStandard()        { return equateToStandard; }
+    public WorkType getWorkType()               { return workType; }
+    public String getProjectTag()               { return projectTag; }
     public OffsetDateTime getCreatedAt()       { return createdAt; }
     public OffsetDateTime getUpdatedAt()       { return updatedAt; }
 
@@ -84,4 +97,6 @@ public class AttendanceReport {
     public void setNote(String note)                           { this.note = note; }
     public void setReportType(AttendanceReportType reportType) { this.reportType = reportType; }
     public void setEquateToStandard(boolean equateToStandard)  { this.equateToStandard = equateToStandard; }
+    public void setWorkType(WorkType workType)                  { this.workType = workType; }
+    public void setProjectTag(String projectTag)                { this.projectTag = projectTag; }
 }

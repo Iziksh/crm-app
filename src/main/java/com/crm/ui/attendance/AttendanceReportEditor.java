@@ -161,7 +161,9 @@ public class AttendanceReportEditor extends Dialog {
                 exitPicker.getValue(),
                 notesField.getValue().isBlank() ? null : notesField.getValue(),
                 type,
-                equateBox.getValue());
+                equateBox.getValue(),
+                null,
+                null);
         try {
             if (editing == null) service.createReport(userId, req);
             else                 service.editReport(editing.id(), req);

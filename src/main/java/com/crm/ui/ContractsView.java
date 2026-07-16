@@ -32,6 +32,7 @@ import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.VaadinSession;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -69,14 +70,19 @@ public class ContractsView extends VerticalLayout implements HasDynamicTitle {
         add(new H2(i18n.translate("view.contracts.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
-        grid.setItems(DataProvider.fromCallbacks(
-            query -> {
-                int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
-                return contractService.findAll(PageRequest.of(page, query.getLimit()), statusFilter.getValue())
-                        .getContent().stream();
-            },
-            query -> (int) contractService.count(statusFilter.getValue())
-        ));
+        Long selectedAccountId = (Long) VaadinSession.getCurrent().getAttribute("adminSelectedAccountId");
+        if (selectedAccountId != null) {
+            grid.setItems(contractService.findByAccount(selectedAccountId));
+        } else {
+            grid.setItems(DataProvider.fromCallbacks(
+                query -> {
+                    int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
+                    return contractService.findAll(PageRequest.of(page, query.getLimit()), statusFilter.getValue())
+                            .getContent().stream();
+                },
+                query -> (int) contractService.count(statusFilter.getValue())
+            ));
+        }
     }
 
     @Override

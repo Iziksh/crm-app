@@ -13,9 +13,15 @@ public record UserAdminResponse(
         Set<String> roles,
         UserStatus status,
         Long workspaceId,
+        Long managerId,
+        String managerName,
         LocalDateTime createdAt
 ) {
     public static UserAdminResponse from(User user) {
+        return from(user, null);
+    }
+
+    public static UserAdminResponse from(User user, String managerName) {
         return new UserAdminResponse(
                 user.getId(),
                 user.getUsername(),
@@ -23,6 +29,8 @@ public record UserAdminResponse(
                 user.getRoles(),
                 user.getStatus(),
                 user.getWorkspaceId(),
+                user.getManagerId(),
+                managerName,
                 user.getCreatedAt()
         );
     }

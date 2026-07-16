@@ -34,6 +34,7 @@ import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.StreamResource;
+import com.vaadin.flow.server.VaadinSession;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.data.domain.PageRequest;
 
@@ -70,17 +71,22 @@ public class ContactsView extends VerticalLayout implements HasDynamicTitle {
         add(new H2(i18n.translate("view.contacts.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
-        grid.setItems(DataProvider.fromCallbacks(
-            query -> {
-                int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
-                String search = searchField.getValue();
-                if (search != null && !search.isBlank()) {
-                    return contactService.search(search, PageRequest.of(page, query.getLimit())).getContent().stream();
-                }
-                return contactService.findAll(PageRequest.of(page, query.getLimit())).getContent().stream();
-            },
-            query -> (int) contactService.count(searchField.getValue())
-        ));
+        Long selectedAccountId = (Long) VaadinSession.getCurrent().getAttribute("adminSelectedAccountId");
+        if (selectedAccountId != null) {
+            grid.setItems(contactService.findByAccount(selectedAccountId));
+        } else {
+            grid.setItems(DataProvider.fromCallbacks(
+                query -> {
+                    int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
+                    String search = searchField.getValue();
+                    if (search != null && !search.isBlank()) {
+                        return contactService.search(search, PageRequest.of(page, query.getLimit())).getContent().stream();
+                    }
+                    return contactService.findAll(PageRequest.of(page, query.getLimit())).getContent().stream();
+                },
+                query -> (int) contactService.count(searchField.getValue())
+            ));
+        }
     }
 
     @Override
@@ -268,6 +274,7 @@ public class ContactsView extends VerticalLayout implements HasDynamicTitle {
             ContactRequest req = new ContactRequest(
                     firstName.getValue(), lastName.getValue(), email.getValue(),
                     phone.getValue(), jobTitle.getValue(), department.getValue(),
+                    existing != null ? existing.company() : null,
                     status.getValue(), notes.getValue(),
                     selectedAccount != null ? selectedAccount.id() : null);
             try {

@@ -25,6 +25,17 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmailAndWorkspaceId(String email, Long workspaceId);
     List<User> findByWorkspaceId(Long workspaceId);
+    List<User> findByWorkspaceIdIsNull();
+    List<User> findByManagerId(Long managerId);
+
+    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.account")
+    List<User> findAllWithAccount();
+
+    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.account WHERE u.workspaceId = :workspaceId")
+    List<User> findByWorkspaceIdWithAccount(@Param("workspaceId") Long workspaceId);
+
+    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.account WHERE u.username = :username")
+    Optional<User> findByUsernameWithAccount(@Param("username") String username);
 
     @Query("SELECT COUNT(u) FROM User u JOIN u.roles r WHERE u.workspaceId = :wsId AND r = :role AND u.status = :status")
     long countByWorkspaceIdAndRoleAndStatus(@Param("wsId") Long workspaceId,

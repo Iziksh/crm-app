@@ -2,6 +2,7 @@ package com.crm.timetracking.dto;
 
 import com.crm.timetracking.entity.AttendanceReport;
 import com.crm.timetracking.enums.AttendanceReportType;
+import com.crm.timetracking.enums.WorkType;
 import com.crm.timetracking.util.DurationCalculator;
 
 import java.time.LocalDate;
@@ -20,6 +21,8 @@ public record AttendanceReportResponse(
         AttendanceReportType reportType,
         String               reportTypeLabel,     // Hebrew label from enum
         boolean              equateToStandard,
+        WorkType             workType,
+        String               projectTag,
         OffsetDateTime       createdAt
 ) {
     public static AttendanceReportResponse from(AttendanceReport r) {
@@ -36,6 +39,8 @@ public record AttendanceReportResponse(
                 r.getReportType(),
                 r.getReportType().getHebrewLabel(),
                 r.isEquateToStandard(),
+                r.getWorkType(),
+                r.getProjectTag(),
                 r.getCreatedAt()
         );
     }

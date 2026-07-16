@@ -37,6 +37,7 @@ import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.VaadinSession;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -82,14 +83,19 @@ public class QuotesView extends VerticalLayout implements HasDynamicTitle {
         add(new H2(i18n.translate("view.quotes.title")), toolbar, grid, detailPanel);
         setFlexGrow(1, grid);
 
-        grid.setItems(DataProvider.fromCallbacks(
-            query -> {
-                int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
-                return quoteService.findAll(PageRequest.of(page, query.getLimit()), statusFilter.getValue())
-                        .getContent().stream();
-            },
-            query -> (int) quoteService.count(statusFilter.getValue())
-        ));
+        Long selectedAccountId = (Long) VaadinSession.getCurrent().getAttribute("adminSelectedAccountId");
+        if (selectedAccountId != null) {
+            grid.setItems(quoteService.findByAccount(selectedAccountId));
+        } else {
+            grid.setItems(DataProvider.fromCallbacks(
+                query -> {
+                    int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
+                    return quoteService.findAll(PageRequest.of(page, query.getLimit()), statusFilter.getValue())
+                            .getContent().stream();
+                },
+                query -> (int) quoteService.count(statusFilter.getValue())
+            ));
+        }
     }
 
     @Override

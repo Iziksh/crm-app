@@ -32,6 +32,10 @@ public class Contact {
     private String jobTitle;
     private String department;
 
+    /** Free-text organization name, captured even when the contact's employer doesn't yet exist as
+     * a formal Account record. Distinct from {@link #account}, which links to an actual Account. */
+    private String company;
+
     @Enumerated(EnumType.STRING)
     private ContactStatus status;
 
@@ -75,6 +79,8 @@ public class Contact {
     public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
     public String getDepartment() { return department; }
     public void setDepartment(String department) { this.department = department; }
+    public String getCompany() { return company; }
+    public void setCompany(String company) { this.company = company; }
     public ContactStatus getStatus() { return status; }
     public void setStatus(ContactStatus status) { this.status = status; }
     public String getNotes() { return notes; }

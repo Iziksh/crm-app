@@ -5017,3 +5017,87 @@ byte[] excel = excelService.generateMonthlyReport(
 ```
 
 The accountant receives a single `.xlsx` file that consolidates clock-session sheets (Phase 25), the new manual-reports sheet, and a Summary that aggregates both sources per employee.
+
+---
+
+### Phase 26 — Billing & Documents ✅ COMPLETE (built)
+
+דרישת תשלום → חשבונית מס/קבלה: payment requests that convert into Israeli tax-compliant documents, with RTL Hebrew PDF rendering, sharing (email/WhatsApp/print/download), VAT/allocation-number handling, and strict tenant scoping.
+
+**Packaging.** One self-contained module, `com.crm.billing.*` (entity/enums/repository/dto/service/exception/controller), mirroring this codebase's existing `com.crm.timetracking.*` pattern for a bolt-on feature — the same model the original design prompt asked for, just matching this project's own naming convention instead of `com.crm.plugin.billing`. Vaadin views live under `com.crm.ui.*` alongside every other view, since routing/nav registration in `MainLayout` is centralized and imperative.
+
+**Entity mapping (no new tenant/customer entities).** The design prompt this phase was built from assumed a `Company` entity (issuer, `@TenantId`) and a `Customer` entity — neither exists here. Instead:
+- **`Company` → `Workspace`** (`domain/entity/Workspace.java`) — added `taxStatus` (`WorkspaceTaxStatus`: `EXEMPT_DEALER`/`AUTHORIZED_DEALER`/`LIMITED_COMPANY`), `legalName`, `taxId`, `businessAddress`, `businessEmail`, `businessPhone`.
+- **`Customer` → `Account`** (`domain/entity/Account.java`) — added `taxId`.
+
+**Per-tenant enable/disable.** Reuses the existing `Addon`/`AddonService.accountHasActiveAddon(accountId, name)` mechanism — the same one that already gates "Time Clock" — with a row named `"Billing & Documents"`. `com.crm.ui.AddonGate` centralizes the check (`isAdminUser || addonService.accountHasActiveAddon(...)`) for `MainLayout`'s nav entries and all three billing views.
+
+#### BE Step 26.1 — Enums (`com.crm.billing.enums`)
+`PaymentRequestStatus` (OPEN/CONVERTED/CANCELLED), `DocumentType` (TAX_INVOICE, TAX_INVOICE_RECEIPT, RECEIPT, PROFORMA, QUOTE, CREDIT_INVOICE), `DocumentStatus` (DRAFT/ISSUED/CANCELLED), `VatType` (STANDARD/ZERO/EXEMPT), `PaymentMethod`, `DiscountType` (PERCENT/AMOUNT), `RoundingMode` (NONE/TO_AGOROT/TO_SHEKEL), `AllocationStatus` (NOT_REQUIRED/PENDING/ISSUED/FAILED), `DocumentOwnerType` (PAYMENT_REQUEST/TAX_DOCUMENT). `WorkspaceTaxStatus` lives in `domain.enums` alongside `AccountType`, since it's a `Workspace` field.
+
+#### BE Step 26.2 — Entities (`com.crm.billing.entity`)
+- `PaymentRequest` — workspace + account (customer) FKs, own number series, status, totals (tax-neutral, no VAT breakdown), `convertedDocumentId`.
+- `TaxDocument` — workspace + account FKs, `documentType`, number (per workspace+type+year), status, VAT/discount/rounding fields, net/VAT/pre-round/rounding-delta/gross totals, `allocationStatus`/`allocationNumber`, `originalDocumentId` (credit-note reference), `sourcePaymentRequestId` (conversion link), `issuedAt`.
+- `DocumentLineItem` — shared by both owners via a polymorphic `ownerType`/`ownerId` pair (the same "one table, multiple owning types" shape as `Attachment.entityType`/`entityId` from Phase 16): מוצר/שירות, multi-line description, quantity, unitPrice, lineTotal, sortOrder.
+- `DocumentPayment` — payments-received rows against an issued `TaxDocument`.
+- `PaymentRequestSequence` / `TaxDocumentSequence` — one row per (workspace[, documentType], year); `lastNumber` incremented under a row lock. `Quote`/`SalesOrder` numbering (`new Random().nextInt(900)+100`) was neither sequential nor collision-safe, so this is a fresh implementation, not a reuse.
+- `AllocationThreshold` — effective-dated (global, not per-tenant): seeded 10,000 ₪ @ 2026-01-01, 5,000 ₪ @ 2026-06-01.
+
+#### BE Step 26.3 — Repositories (`com.crm.billing.repository`)
+Tenant-scoped via `WHERE workspace.id IN :ids` (mirrors `AccountRepository`), with `JOIN FETCH workspace, account` on the id-lookup queries so entities survive across the multiple independently-committed transactions `ConversionService` orchestrates. The two sequence repositories expose a `@Lock(PESSIMISTIC_WRITE)` `findForUpdate(...)` query (real `SELECT ... FOR UPDATE`), paired with a `PaymentRequestSequenceInitializer`/`TaxDocumentSequenceInitializer` bean (`@Transactional(REQUIRES_NEW)`) that lazily creates the first row for a given key and safely absorbs a lost create-race via `DataIntegrityViolationException`.
+
+#### BE Step 26.4 — DTOs (`com.crm.billing.dto`)
+`LineItemRequest`/`Response`, `PaymentRequestCreateRequest`/`Response`, `TaxDocumentCreateRequest`/`Response`, `DocumentPaymentRequest`/`Response`, `TotalsBreakdown` + `TotalsPreviewRequest`, `ShareRequest` (EMAIL/WHATSAPP), `ConvertRequest`, `IssueResultResponse`, `CustomerQuickCreateRequest`/`Response` — Bean Validation throughout (`@NotBlank`, `@Pattern(regexp="^\\d{9}$")` for tax ids, etc).
+
+#### BE Step 26.5 — Services (`com.crm.billing.service`)
+- **`TotalsCalculator`** — net → discount(%/₪) → VAT(`tax.vat.standard-rate`, default `0.18`, externalized) → rounding → gross. `BigDecimal` scale 2, `HALF_UP`. No existing house convention for money in this codebase was authoritative enough to reuse, so this class is the new standard for the addon.
+- **`PaymentRequestNumberingService`** / **`TaxDocumentNumberingService`** — row-locking increment; tax numbers only burned at issue time.
+- **`IsraelTaxAuthorityService`** (interface, documented assumption — no real client/spec existed anywhere in this codebase) + **`IsraelTaxAuthorityStubAdapter`** (`@ConditionalOnProperty(tax.authority.mode=stub, default)`, sandbox, always succeeds) — a `live` implementation can be added later behind the same interface without touching callers.
+- **`AllocationNumberService`** — TAX_INVOICE/TAX_INVOICE_RECEIPT + STANDARD VAT + net-before-VAT over the effective threshold ⇒ required. Below threshold or ZERO/EXEMPT VAT ⇒ `NOT_REQUIRED`. Required but customer has no tax id ⇒ blocks issuance (`MissingCustomerTaxIdException`) rather than silently skipping — see the class javadoc for how this resolves an apparent tension in the original design prompt between "skip for foreign customers" and "missing tax id blocks".
+- **`PaymentRequestService`** — create/update only while `OPEN`; `NotEditableException` once `CONVERTED`.
+- **`TaxDocumentDraftService`** — DRAFT-only editing; `ImmutableDocumentException` once `ISSUED`.
+- **`TaxDocumentIssueService`** — DRAFT→ISSUED; idempotent (re-issue returns the existing result); `AllocationAttemptRunner` (separate bean, `REQUIRES_NEW`) persists a FAILED allocation status durably even though the enclosing issue attempt then aborts without burning a number.
+- **`ConversionService`** — payment request → tax document. Deliberately *not* one long transaction: draft-creation, issuing, and marking the payment request converted are three independently-committed, individually-idempotent steps (see class javadoc) — resumable from any point, and avoids a Postgres read-committed visibility trap the naive single-transaction version hit during development.
+- **`CustomerQuickCreateService`** — thin wrapper over the existing `Account`/`AccountRepository`.
+- **`DocumentPdfService`** — new iText7 (kernel+layout) RTL renderer; Hebrew glyphs via a bundled Noto Sans Hebrew TTF (no PDF stack existed in this codebase before this phase). See class javadoc for a font-instance-per-render fix (iText binds fonts to whichever `PdfDocument` embeds them first) and a known text-extraction-fidelity limitation without the commercial pdfCalligraph module (visual rendering is unaffected).
+- **`DocumentShareService`** + **`MessageChannelSender`**/**`WhatsAppLinkSender`** — email attachment follows `timetracking.service.ReportEmailService`'s `MimeMessageHelper(msg, true, "UTF-8")` + `addAttachment` pattern (the existing `EmailService` has no attachment method). WhatsApp is a `wa.me` deep link with pre-filled text only — per the design prompt, a full Business API client wasn't built, so the PDF itself isn't attachable through the link; a human still attaches the separately-downloaded PDF inside WhatsApp.
+
+#### BE Step 26.6 — Domain exceptions
+`NotEditableException`, `AlreadyConvertedException`, `IllegalConversionTargetForTaxStatusException`, `MissingCustomerTaxIdException`, `AllocationRequiredButFailedException`, `ImmutableDocumentException`, `CrossTenantAccessException` (mapped to 404, not 403, to avoid revealing cross-tenant existence) — wired into the existing central `GlobalExceptionHandler` (`com.crm.exception`), the same one that already maps `AttendanceValidationException` from `com.crm.timetracking`.
+
+#### BE Step 26.7 — Controllers (`com.crm.billing.controller`)
+`PaymentRequestController` (`/api/v1/billing/payment-requests`, incl. `/convert`), `TaxDocumentController` (`/api/v1/billing/tax-documents`, incl. `/issue`, `/payments`), `BillingSupportController` (`/api/v1/billing/totals-preview`, `/customers`, `/{ownerType}/{id}/pdf`, `/share`). `SecurityConfig` gates `/api/v1/billing/**` behind `hasAnyRole("SALES","ADMIN")`, the same rule as the rest of the sales pipeline. Note: the Vaadin views call the `@Service` beans directly (this codebase's existing convention — see `QuotesView`), not these REST endpoints; the controllers exist as the addon's public API surface.
+
+#### FE Step 26.8 — Vaadin views (`com.crm.ui`)
+- **`PaymentRequestEditorView`** (`/payment-requests`) — grid + create/edit dialog: customer picker (+ quick-create), date, currency, free text, shared line-item grid (add/duplicate/delete).
+- **`PaymentRequestDocumentView`** (`/payment-request-document/{id}`) — blue summary header, tax-status-gated action bar (יצירת חשבון/קבלה, יצירת חשבון עסקה hidden for exempt, אפשרויות נוספות), left share panel (email/WhatsApp/print/download via `StreamResource`, sidestepping the stateless-JWT-vs-session-Vaadin auth mismatch a raw REST-endpoint iframe would hit), RTL preview.
+- **`TaxDocumentEditorView`** (`/tax-documents`) — document type/currency, customer, date, free text, line-item grid with discount(%/₪) + rounding + net/VAT/gross totals, payments-received section, save-draft/issue actions.
+- **`CustomerQuickCreateDialog`** — שם מלא (required), ת"ז/ח"פ, טלפון, מייל, "הצגת פרטים נוספים" toggle, שמירה.
+
+RTL/Hebrew uses the existing `messages_he.properties` + `LocaleService`/`frontend/i18n.css` infrastructure — already real, just extended with new keys, not rebuilt.
+
+#### FE Step 26.9 — Navigation
+`MainLayout` adds a "מסמכים וחיובים" nav group (`nav.billing`) with "דרישות תשלום"/"מסמכי חשבונאות" sub-items, gated by `AddonGate.currentUserHasBillingDocuments()` exactly like the existing "Time Clock" entry.
+
+#### Flyway migrations
+`V2.12.0__add_billing_profile_fields.sql` (Workspace/Account columns), `V2.13.0__create_billing_tables.sql` (all new tables + the two `AllocationThreshold` seed rows). No per-module namespace/subfolder convention existed to match — table names carry that instead.
+
+#### Configuration
+```properties
+tax.vat.standard-rate=0.18
+tax.authority.mode=stub
+```
+
+#### Removing this addon
+Delete `com.crm.billing.*`, `com.crm.ui.{PaymentRequestEditorView,PaymentRequestDocumentView,TaxDocumentEditorView,CustomerQuickCreateDialog,AddonGate}`, the two Flyway migrations (plus the `workspaces`/`accounts` columns they added, if truly unused elsewhere), the `nav.billing` block in `MainLayout`, the `/api/v1/billing/**` line in `SecurityConfig`, the `itext7-core` dependency and `src/main/resources/fonts/`, and the `tax.*` properties. Nothing else in the CRM references these types.
+
+#### Verification Phase 26
+1. `mvn compile` succeeds with the new `itext7-core` dependency; `mvn test -Dtest=com.crm.billing.**` passes (36 tests: totals, numbering concurrency, immutability, allocation thresholds, conversion gating/idempotency, PDF rendering, tenancy, addon flag).
+2. Run the two new Flyway migrations (dev profile normally runs with `spring.flyway.enabled=false`/`ddl-auto=update` — verify for real against the `postgres` profile).
+3. Attach a `"Billing & Documents"` `Addon` row to a test Account/user → confirm the "מסמכים וחיובים" nav group appears only for that user.
+4. Create a payment request for a quick-created customer → confirm it's editable while `OPEN` → render + email/WhatsApp-share its PDF.
+5. Set the workspace's `taxStatus` to `EXEMPT_DEALER` → convert → only קבלה offered, PDF shows no VAT line, no allocation number.
+6. Set `taxStatus` to `AUTHORIZED_DEALER` → convert to חשבונית מס/קבלה above the current (5,000 ₪ post-2026-06-01) allocation threshold → allocation number requested via the stub adapter and shown on the PDF.
+7. Retry the same conversion → idempotent, no duplicate tax document, no duplicate allocation number.
+8. Attempt to read/write another workspace's payment request or tax document → 404, not 403; confirm SUPER_ADMIN/ADMIN bypass still works.
+9. Detach the `Addon` row → nav group and view access disappear without touching Time Clock or any other feature.

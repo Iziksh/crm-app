@@ -124,6 +124,11 @@ public class ActivityService {
     }
 
     @Transactional(readOnly = true)
+    public List<ActivityResponse> findByAccount(Long accountId) {
+        return activityRepository.findByAccount_Id(accountId).stream().map(ActivityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ActivityResponse> findByType(ActivityType type) {
         return activityRepository.findByType(type).stream().map(ActivityResponse::from).toList();
     }

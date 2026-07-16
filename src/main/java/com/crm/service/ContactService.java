@@ -37,7 +37,7 @@ public class ContactService {
 
     public ContactResponse create(ContactRequest request) {
         if (contactRepository.existsByEmail(request.email())) {
-            throw new DuplicateEmailException(request.email());
+            throw new DuplicateEmailException("Contact", request.email());
         }
         Contact contact = mapToEntity(new Contact(), request);
         workspaceContext.currentUserPrimaryWorkspace().ifPresent(contact::setWorkspace);
@@ -121,7 +121,7 @@ public class ContactService {
     public ContactResponse update(Long id, ContactRequest request) {
         Contact contact = getOrThrow(id);
         if (!request.email().equals(contact.getEmail()) && contactRepository.existsByEmail(request.email())) {
-            throw new DuplicateEmailException(request.email());
+            throw new DuplicateEmailException("Contact", request.email());
         }
         ContactResponse response = ContactResponse.from(contactRepository.save(mapToEntity(contact, request)));
         eventPublisher.publishUpdated("CONTACT", id);
@@ -145,6 +145,7 @@ public class ContactService {
         contact.setPhone(request.phone());
         contact.setJobTitle(request.jobTitle());
         contact.setDepartment(request.department());
+        contact.setCompany(request.company());
         contact.setStatus(request.status());
         contact.setNotes(request.notes());
 

@@ -1,5 +1,6 @@
 package com.crm.controller;
 
+import com.crm.domain.entity.User;
 import com.crm.dto.request.UserRequest;
 import com.crm.dto.response.UserResponse;
 import com.crm.service.UserService;
@@ -9,7 +10,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/users")
@@ -20,6 +24,13 @@ public class UserController {
 
     public UserController(UserService userService) {
         this.userService = userService;
+    }
+
+    /** The caller's own direct reports — open to any authenticated user (manager status is data-driven, not role-based). */
+    @GetMapping("/my-direct-reports")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<UserResponse>> myDirectReports(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(userService.findDirectReports(user.getId()));
     }
 
     @GetMapping

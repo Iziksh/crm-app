@@ -2,6 +2,7 @@ package com.crm.controller;
 
 import com.crm.domain.entity.User;
 import com.crm.dto.request.AdminInviteRequest;
+import com.crm.dto.request.ChangeManagerRequest;
 import com.crm.dto.request.ChangeRoleRequest;
 import com.crm.dto.request.VerifyInviteOtpRequest;
 import com.crm.dto.response.AuthResponse;
@@ -82,13 +83,25 @@ public class UserAdminController {
         return ResponseEntity.noContent().build();
     }
 
+    /** Assign or clear a user's direct manager (must be in the same workspace). */
+    @PutMapping("/{id}/manager")
+    public ResponseEntity<Void> changeManager(@PathVariable Long id,
+                                              @Valid @RequestBody ChangeManagerRequest request,
+                                              @AuthenticationPrincipal User actingUser) {
+        adminService.changeManager(id, request.managerId(), actingUser);
+        return ResponseEntity.noContent().build();
+    }
+
     /** List all users in a workspace (company). */
     @GetMapping
     public ResponseEntity<List<UserAdminResponse>> listUsers(
             @RequestParam Long workspaceId,
             @AuthenticationPrincipal User actingUser) {
-        List<UserAdminResponse> users = adminService.listWorkspaceUsers(workspaceId, actingUser)
-                .stream().map(UserAdminResponse::from).toList();
-        return ResponseEntity.ok(users);
+        List<User> users = adminService.listWorkspaceUsers(workspaceId, actingUser);
+        Map<Long, String> managerNames = adminService.resolveManagerNames(users);
+        List<UserAdminResponse> responses = users.stream()
+                .map(u -> UserAdminResponse.from(u, managerNames.get(u.getManagerId())))
+                .toList();
+        return ResponseEntity.ok(responses);
     }
 }

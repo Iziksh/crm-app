@@ -201,6 +201,37 @@ public class AdminUserManagementService {
         return userRepository.findByWorkspaceId(workspaceId);
     }
 
+    /** Batch-resolves manager usernames for a list of users, keyed by managerId. */
+    @Transactional(readOnly = true)
+    public java.util.Map<Long, String> resolveManagerNames(List<User> users) {
+        Set<Long> managerIds = users.stream()
+                .map(User::getManagerId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        // Mutable HashMap, not Map.of(): callers look up by a possibly-null managerId, and
+        // Map.of()'s .get(null) throws NPE (immutable maps reject null keys) instead of
+        // returning null like a normal map would.
+        if (managerIds.isEmpty()) return new java.util.HashMap<>();
+        return userRepository.findAllById(managerIds).stream()
+                .collect(java.util.stream.Collectors.toMap(User::getId, User::getUsername));
+    }
+
+    // ── Change Manager ────────────────────────────────────────────────────────
+
+    public void changeManager(Long targetUserId, Long managerId, User actingUser) {
+        User target = requireUser(targetUserId);
+        assertCanManage(actingUser, target);
+        if (managerId != null) {
+            if (managerId.equals(targetUserId)) {
+                throw new BadRequestException("A user cannot be their own manager");
+            }
+            User manager = requireUser(managerId);
+            if (!Objects.equals(manager.getWorkspaceId(), target.getWorkspaceId())) {
+                throw new UserOperationForbiddenException("Manager must be in the same workspace");
+            }
+        }
+        target.setManagerId(managerId);
+        userRepository.save(target);
+    }
+
     // ── Guards ────────────────────────────────────────────────────────────────
 
     private void assertCanManage(User acting, User target) {

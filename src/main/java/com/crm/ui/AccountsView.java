@@ -2,9 +2,12 @@ package com.crm.ui;
 
 import com.crm.domain.enums.AccountType;
 import com.crm.dto.request.AccountRequest;
+import com.crm.dto.request.AddonRequest;
 import com.crm.dto.response.AccountResponse;
+import com.crm.dto.response.AddonResponse;
 import com.crm.dto.response.ImportResultResponse;
 import com.crm.service.AccountService;
+import com.crm.service.AddonService;
 import com.crm.service.AttachmentService;
 import com.crm.service.ImportService;
 import com.crm.service.TranslationService;
@@ -12,6 +15,7 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.combobox.ComboBox;
 import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
+import com.vaadin.flow.component.datepicker.DatePicker;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.formlayout.FormLayout;
 import com.vaadin.flow.component.grid.Grid;
@@ -23,7 +27,10 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.tabs.Tab;
+import com.vaadin.flow.component.tabs.TabSheet;
 import com.vaadin.flow.component.textfield.EmailField;
+import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.component.upload.receivers.MemoryBuffer;
@@ -44,16 +51,19 @@ public class AccountsView extends VerticalLayout implements HasDynamicTitle {
     private final ImportService importService;
     private final AttachmentService attachmentService;
     private final SecurityService securityService;
+    private final AddonService addonService;
     private final Grid<AccountResponse> grid = new Grid<>(AccountResponse.class, false);
     private final TextField searchField = new TextField();
 
     public AccountsView(TranslationService i18n, AccountService accountService, ImportService importService,
-                        AttachmentService attachmentService, SecurityService securityService) {
+                        AttachmentService attachmentService, SecurityService securityService,
+                        AddonService addonService) {
         this.i18n = i18n;
         this.accountService = accountService;
         this.importService = importService;
         this.attachmentService = attachmentService;
         this.securityService = securityService;
+        this.addonService = addonService;
         setSizeFull();
         setPadding(true);
 
@@ -182,11 +192,15 @@ public class AccountsView extends VerticalLayout implements HasDynamicTitle {
     }
 
     private void openDialog(AccountResponse existing) {
+        boolean isSuperAdmin = securityService.hasRole("SUPER_ADMIN")
+                || securityService.hasRole("ADMIN")
+                || securityService.hasRole("COMPANY_ADMIN");
+
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle(existing == null
                 ? i18n.translate("view.accounts.dialog.new")
                 : i18n.translate("view.accounts.dialog.edit"));
-        dialog.setWidth("480px");
+        dialog.setWidth("800px");
 
         TextField name = new TextField(i18n.translate("common.column.name"));
         TextField industry = new TextField(i18n.translate("view.accounts.column.industry"));
@@ -218,9 +232,15 @@ public class AccountsView extends VerticalLayout implements HasDynamicTitle {
         AttachmentPanel attachments = new AttachmentPanel(i18n, attachmentService, "ACCOUNT",
                 existing != null ? existing.id() : null, securityService.getUsername());
 
-        VerticalLayout body = new VerticalLayout(form, attachments);
-        body.setPadding(false);
-        dialog.add(body);
+        VerticalLayout detailsContent = new VerticalLayout(form, attachments);
+        detailsContent.setPadding(false);
+
+        TabSheet tabs = new TabSheet();
+        tabs.setWidthFull();
+        tabs.add(new Tab(i18n.translate("view.accounts.tab.details")), detailsContent);
+        tabs.add(new Tab(i18n.translate("view.accounts.tab.addons")), buildAddonsTab(existing, isSuperAdmin));
+
+        dialog.add(tabs);
 
         Button save = new Button(i18n.translate("dialog.save"), e -> {
             if (name.getValue().isBlank()) {
@@ -240,6 +260,122 @@ public class AccountsView extends VerticalLayout implements HasDynamicTitle {
                 refreshGrid();
                 dialog.close();
                 notify(i18n.translate("notification.account.saved"), false);
+            } catch (Exception ex) {
+                notify(ex.getMessage(), true);
+            }
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        Button cancel = new Button(i18n.translate("dialog.cancel"), e -> dialog.close());
+        dialog.getFooter().add(cancel, save);
+        dialog.open();
+    }
+
+    private VerticalLayout buildAddonsTab(AccountResponse existing, boolean isSuperAdmin) {
+        VerticalLayout layout = new VerticalLayout();
+        layout.setPadding(false);
+        layout.setWidthFull();
+
+        if (existing == null) {
+            layout.add(new Span(i18n.translate("view.accounts.addons.saveFirst")));
+            return layout;
+        }
+
+        Grid<AddonResponse> addonGrid = new Grid<>(AddonResponse.class, false);
+        addonGrid.setWidthFull();
+        addonGrid.setHeight("250px");
+        addonGrid.addColumn(AddonResponse::name)
+                 .setHeader(i18n.translate("common.column.name"))
+                 .setFlexGrow(2);
+        addonGrid.addColumn(AddonResponse::description)
+                 .setHeader(i18n.translate("view.accounts.addons.description"))
+                 .setFlexGrow(3);
+        addonGrid.addColumn(r -> r.expiryDate() != null ? r.expiryDate().toString() : "—")
+                 .setHeader(i18n.translate("view.accounts.addons.expiryDate"))
+                 .setFlexGrow(1);
+
+        if (isSuperAdmin) {
+            addonGrid.addComponentColumn(addon -> {
+                Button edit = new Button(VaadinIcon.EDIT.create(),
+                        e -> openAddonDialog(existing.id(), addon, addonGrid));
+                edit.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                Button delete = new Button(VaadinIcon.TRASH.create(), e -> {
+                    addonService.delete(addon.id());
+                    addonGrid.setItems(addonService.findByAccount(existing.id()));
+                    notify(i18n.translate("view.accounts.addons.deleted"), false);
+                });
+                delete.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_ERROR);
+                HorizontalLayout actions = new HorizontalLayout(edit, delete);
+                actions.setSpacing(false);
+                return actions;
+            }).setHeader(i18n.translate("common.column.actions"))
+              .setFlexGrow(0).setWidth("120px");
+
+            Button addAddon = new Button(
+                    i18n.translate("view.accounts.addons.button.add"),
+                    VaadinIcon.PLUS.create(),
+                    e -> openAddonDialog(existing.id(), null, addonGrid));
+            addAddon.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
+            layout.add(addAddon);
+        }
+
+        addonGrid.setItems(addonService.findByAccount(existing.id()));
+        layout.add(addonGrid);
+
+        return layout;
+    }
+
+    private static final java.util.List<String> ADDON_CATALOG = java.util.List.of(
+            "Time Clock"
+    );
+
+    private void openAddonDialog(Long accountId, AddonResponse existing, Grid<AddonResponse> addonGrid) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(existing == null
+                ? i18n.translate("view.accounts.addons.dialog.new")
+                : i18n.translate("view.accounts.addons.dialog.edit"));
+        dialog.setWidth("460px");
+
+        ComboBox<String> name = new ComboBox<>(i18n.translate("common.column.name"));
+        name.setItems(ADDON_CATALOG);
+        name.setAllowCustomValue(true);
+        name.setRequired(true);
+        name.setWidthFull();
+        name.setPlaceholder(i18n.translate("view.accounts.addons.name.placeholder"));
+        name.addCustomValueSetListener(e -> name.setValue(e.getDetail()));
+
+        TextArea description = new TextArea(i18n.translate("view.accounts.addons.description"));
+        description.setWidthFull();
+        description.setMinHeight("80px");
+
+        DatePicker expiryDate = new DatePicker(i18n.translate("view.accounts.addons.expiryDate"));
+        expiryDate.setWidthFull();
+
+        if (existing != null) {
+            name.setValue(existing.name());
+            description.setValue(nvl(existing.description()));
+            if (existing.expiryDate() != null) expiryDate.setValue(existing.expiryDate());
+        }
+
+        VerticalLayout form = new VerticalLayout(name, description, expiryDate);
+        form.setPadding(false);
+        dialog.add(form);
+
+        Button save = new Button(i18n.translate("dialog.save"), e -> {
+            if (name.getValue() == null || name.getValue().isBlank()) {
+                name.setInvalid(true);
+                name.setErrorMessage(i18n.translate("common.validation.nameRequired"));
+                return;
+            }
+            try {
+                AddonRequest req = new AddonRequest(
+                        name.getValue().trim(),
+                        description.getValue().isBlank() ? null : description.getValue().trim(),
+                        expiryDate.getValue());
+                if (existing == null) addonService.create(accountId, req);
+                else addonService.update(existing.id(), req);
+                addonGrid.setItems(addonService.findByAccount(accountId));
+                dialog.close();
+                notify(i18n.translate("view.accounts.addons.saved"), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }

@@ -48,6 +48,15 @@ public class User implements UserDetails {
     @Column(name = "workspace_id")
     private Long workspaceId;
 
+    /** Direct manager's user id (self-referencing), null if unassigned. Plain FK, not a JPA
+     * relationship, to avoid lazy-loading cycles — same convention as {@link #workspaceId}. */
+    @Column(name = "manager_id")
+    private Long managerId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "account_id")
+    private Account account;
+
     @Column(length = 5)
     private String locale;
 
@@ -92,6 +101,10 @@ public class User implements UserDetails {
     }
     public Long getWorkspaceId() { return workspaceId; }
     public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
+    public Long getManagerId() { return managerId; }
+    public void setManagerId(Long managerId) { this.managerId = managerId; }
+    public Account getAccount() { return account; }
+    public void setAccount(Account account) { this.account = account; }
     public String getLocale() { return locale; }
     public void setLocale(String locale) { this.locale = locale; }
     public LocalDateTime getCreatedAt() { return createdAt; }

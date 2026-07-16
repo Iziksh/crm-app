@@ -11,12 +11,18 @@ public record UserResponse(
         String email,
         Set<String> roles,
         boolean enabled,
+        Long managerId,
+        String managerName,
         LocalDateTime createdAt
 ) {
     public static UserResponse from(User u) {
+        return from(u, null);
+    }
+
+    public static UserResponse from(User u, String managerName) {
         return new UserResponse(
                 u.getId(), u.getUsername(), u.getEmail(),
-                u.getRoles(), u.isEnabled(), u.getCreatedAt()
+                u.getRoles(), u.isEnabled(), u.getManagerId(), managerName, u.getCreatedAt()
         );
     }
 }

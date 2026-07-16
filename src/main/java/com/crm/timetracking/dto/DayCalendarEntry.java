@@ -11,5 +11,8 @@ public record DayCalendarEntry(
         boolean                        isWeekend,
         boolean                        isHoliday,
         String                         holidayName,     // null if not a holiday
-        int                            deltaMinutes     // totalWorkedMinutes - standardMinutes
+        int                            deltaMinutes,    // totalWorkedMinutes - standardMinutes
+        int                            regularMinutes,      // min(totalWorkedMinutes, standardMinutes)
+        int                            overtime125Minutes,  // first 120 min beyond standard
+        int                            overtime150Minutes   // beyond 120 min over standard
 ) {}

@@ -37,6 +37,11 @@ public class Account {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    /** ת"ז/ח"פ of this account when it is billed as a customer (Billing & Documents addon).
+     * Null means a foreign/unregistered customer — skips allocation-number requests. */
+    @Column(name = "tax_id", length = 20)
+    private String taxId;
+
     @CreatedDate
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -53,6 +58,9 @@ public class Account {
 
     @OneToMany(mappedBy = "account", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<Address> addresses = new ArrayList<>();
+
+    @OneToMany(mappedBy = "account", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    private List<Addon> addons = new ArrayList<>();
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -72,12 +80,16 @@ public class Account {
     public void setType(AccountType type) { this.type = type; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+    public String getTaxId() { return taxId; }
+    public void setTaxId(String taxId) { this.taxId = taxId; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public List<Contact> getContacts() { return contacts; }
     public void setContacts(List<Contact> contacts) { this.contacts = contacts; }
     public List<Address> getAddresses() { return addresses; }
     public void setAddresses(List<Address> addresses) { this.addresses = addresses; }
+    public List<Addon> getAddons() { return addons; }
+    public void setAddons(List<Addon> addons) { this.addons = addons; }
     public Workspace getWorkspace() { return workspace; }
     public void setWorkspace(Workspace workspace) { this.workspace = workspace; }
 }

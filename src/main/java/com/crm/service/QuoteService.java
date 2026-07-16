@@ -80,6 +80,11 @@ public class QuoteService {
     }
 
     @Transactional(readOnly = true)
+    public List<QuoteResponse> findByAccount(Long accountId) {
+        return quoteRepository.findByAccount_Id(accountId).stream().map(QuoteResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<QuoteResponse> findByStatus(QuoteStatus status) {
         return quoteRepository.findByStatus(status).stream().map(QuoteResponse::from).toList();
     }

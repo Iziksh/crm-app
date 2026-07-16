@@ -32,7 +32,7 @@ public class AccountService {
 
     public AccountResponse create(AccountRequest request) {
         if (request.email() != null && accountRepository.existsByEmail(request.email())) {
-            throw new DuplicateEmailException(request.email());
+            throw new DuplicateEmailException("Account", request.email());
         }
         Account account = mapToEntity(new Account(), request);
         workspaceContext.currentUserPrimaryWorkspace().ifPresent(account::setWorkspace);
@@ -123,7 +123,7 @@ public class AccountService {
         Account account = getOrThrow(id);
         if (request.email() != null && !request.email().equals(account.getEmail())
                 && accountRepository.existsByEmail(request.email())) {
-            throw new DuplicateEmailException(request.email());
+            throw new DuplicateEmailException("Account", request.email());
         }
         AccountResponse response = AccountResponse.from(accountRepository.save(mapToEntity(account, request)));
         eventPublisher.publishUpdated("ACCOUNT", id);

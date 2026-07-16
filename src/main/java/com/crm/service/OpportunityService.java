@@ -99,6 +99,11 @@ public class OpportunityService {
     }
 
     @Transactional(readOnly = true)
+    public List<OpportunityResponse> findByAccount(Long accountId) {
+        return opportunityRepository.findByAccount_Id(accountId).stream().map(OpportunityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<OpportunityResponse> findByStage(OpportunityStage stage) {
         return opportunityRepository.findByStage(stage).stream().map(OpportunityResponse::from).toList();
     }

@@ -10,5 +10,8 @@ public record MonthlyCalendarResponse(
         List<DayCalendarEntry> days,
         int                    totalWorkedMinutes,
         int                    totalStandardMinutes,
-        int                    totalDeltaMinutes
+        int                    totalDeltaMinutes,
+        int                    totalRegularMinutes,
+        int                    totalOvertime125Minutes,
+        int                    totalOvertime150Minutes
 ) {}

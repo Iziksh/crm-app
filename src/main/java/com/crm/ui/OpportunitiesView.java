@@ -32,6 +32,7 @@ import com.vaadin.flow.data.provider.DataProvider;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.VaadinSession;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.data.domain.PageRequest;
 
@@ -67,16 +68,21 @@ public class OpportunitiesView extends VerticalLayout implements HasDynamicTitle
         add(new H2(i18n.translate("view.opportunities.title")), toolbar, grid);
         setFlexGrow(1, grid);
 
-        grid.setItems(DataProvider.fromCallbacks(
-            query -> {
-                int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
-                return opportunityService.findAll(
-                    PageRequest.of(page, query.getLimit()),
-                    stageFilter.getValue(), searchField.getValue()
-                ).getContent().stream();
-            },
-            query -> (int) opportunityService.count(stageFilter.getValue(), searchField.getValue())
-        ));
+        Long selectedAccountId = (Long) VaadinSession.getCurrent().getAttribute("adminSelectedAccountId");
+        if (selectedAccountId != null) {
+            grid.setItems(opportunityService.findByAccount(selectedAccountId));
+        } else {
+            grid.setItems(DataProvider.fromCallbacks(
+                query -> {
+                    int page = query.getLimit() > 0 ? query.getOffset() / query.getLimit() : 0;
+                    return opportunityService.findAll(
+                        PageRequest.of(page, query.getLimit()),
+                        stageFilter.getValue(), searchField.getValue()
+                    ).getContent().stream();
+                },
+                query -> (int) opportunityService.count(stageFilter.getValue(), searchField.getValue())
+            ));
+        }
     }
 
     @Override

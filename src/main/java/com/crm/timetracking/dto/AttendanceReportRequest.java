@@ -1,6 +1,7 @@
 package com.crm.timetracking.dto;
 
 import com.crm.timetracking.enums.AttendanceReportType;
+import com.crm.timetracking.enums.WorkType;
 import jakarta.validation.constraints.NotNull;
 
 import java.time.LocalDate;
@@ -12,5 +13,7 @@ public record AttendanceReportRequest(
         LocalTime                     exitTime,        // null allowed for absence-style types
         String                        note,
         @NotNull AttendanceReportType reportType,
-        boolean                       equateToStandard
+        boolean                       equateToStandard,
+        WorkType                      workType,        // null unless reportType == PRESENCE
+        String                        projectTag       // free-text project/cost-center label
 ) {}

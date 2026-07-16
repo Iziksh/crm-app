@@ -3,9 +3,11 @@ package com.crm.ui;
 import com.crm.domain.entity.User;
 import com.crm.domain.enums.UserStatus;
 import com.crm.dto.request.AdminInviteRequest;
+import com.crm.dto.response.AccountResponse;
 import com.crm.exception.LastAdminException;
 import com.crm.repository.UserRepository;
 import com.crm.repository.WorkspaceRepository;
+import com.crm.service.AccountService;
 import com.crm.service.AdminUserManagementService;
 import com.crm.service.TranslationService;
 import com.crm.service.UserService;
@@ -24,10 +26,12 @@ import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.EmailField;
+import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.server.VaadinSession;
 import jakarta.annotation.security.RolesAllowed;
 
 import java.util.List;
@@ -39,6 +43,7 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
     private final TranslationService i18n;
     private final AdminUserManagementService adminService;
     private final UserService userService;
+    private final AccountService accountService;
     private final UserRepository userRepository;
     private final WorkspaceRepository workspaceRepository;
     private final SecurityService securityService;
@@ -48,12 +53,14 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
 
     public UsersView(AdminUserManagementService adminService,
                      UserService userService,
+                     AccountService accountService,
                      UserRepository userRepository,
                      WorkspaceRepository workspaceRepository,
                      SecurityService securityService,
                      TranslationService i18n) {
         this.adminService = adminService;
         this.userService = userService;
+        this.accountService = accountService;
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
         this.securityService = securityService;
@@ -87,11 +94,16 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
         resolveWorkspaceIfMissing();
         List<User> users;
         if (adminService.isSuperAdmin(actingUser)) {
-            users = userRepository.findAll();
+            users = userRepository.findAllWithAccount();
         } else if (actingUser.getWorkspaceId() == null) {
             users = List.of();
         } else {
-            users = adminService.listWorkspaceUsers(actingUser.getWorkspaceId(), actingUser);
+            users = userRepository.findByWorkspaceIdWithAccount(actingUser.getWorkspaceId());
+        }
+        Long selectedAccountId = (Long) VaadinSession.getCurrent().getAttribute("adminSelectedAccountId");
+        if (selectedAccountId != null) {
+            final Long accId = selectedAccountId;
+            users = users.stream().filter(u -> u.getAccount() != null && accId.equals(u.getAccount().getId())).toList();
         }
         String filter = searchField.getValue().toLowerCase();
         if (!filter.isBlank()) {
@@ -110,6 +122,8 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
                 .setHeader(i18n.translate("common.username")).setSortable(true).setFlexGrow(1);
         grid.addColumn(User::getEmail)
                 .setHeader(i18n.translate("common.email")).setSortable(true).setFlexGrow(2);
+        grid.addColumn(u -> u.getAccount() != null ? u.getAccount().getName() : "—")
+                .setHeader(i18n.translate("common.column.account")).setFlexGrow(2);
 
         grid.addComponentColumn(u -> {
             HorizontalLayout badges = new HorizontalLayout();
@@ -206,6 +220,11 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
             actions.add(editBtn);
 
             if (!isSelf) {
+                Button resetPwBtn = new Button(VaadinIcon.KEY.create(), e -> openResetPasswordDialog(u));
+                resetPwBtn.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                resetPwBtn.getElement().setAttribute("title", i18n.translate("view.users.button.resetPassword"));
+                actions.add(resetPwBtn);
+
                 Button roleBtn = new Button(VaadinIcon.EDIT.create(), e -> openChangeRoleDialog(u));
                 roleBtn.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
                 roleBtn.getElement().setAttribute("title", i18n.translate("view.users.button.changeRole"));
@@ -293,7 +312,18 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
         email.setValue(user.getEmail() != null ? user.getEmail() : "");
         email.setWidthFull();
 
-        FormLayout form = new FormLayout(username, email);
+        ComboBox<AccountResponse> accountBox = new ComboBox<>(i18n.translate("common.column.account"));
+        java.util.List<AccountResponse> accounts = accountService.findAllForExport("");
+        accountBox.setItems(accounts);
+        accountBox.setItemLabelGenerator(AccountResponse::name);
+        accountBox.setClearButtonVisible(true);
+        accountBox.setWidthFull();
+        if (user.getAccount() != null) {
+            accounts.stream().filter(a -> a.id().equals(user.getAccount().getId())).findFirst()
+                    .ifPresent(accountBox::setValue);
+        }
+
+        FormLayout form = new FormLayout(username, email, accountBox);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1));
         dialog.add(form);
 
@@ -301,6 +331,8 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
             if (username.getValue().isBlank()) { username.setInvalid(true); return; }
             try {
                 userService.updateProfile(user.getId(), username.getValue(), email.getValue());
+                Long accountId = accountBox.getValue() != null ? accountBox.getValue().id() : null;
+                userService.setAccount(user.getId(), accountId);
                 dialog.close();
                 refresh();
                 notify(i18n.translate("view.users.notification.saved"), false);
@@ -335,6 +367,43 @@ public class UsersView extends VerticalLayout implements HasDynamicTitle {
                 notify(i18n.translate("view.users.notification.roleChanged"), false);
             } catch (LastAdminException ex) {
                 notify(i18n.translate("view.users.notification.lastAdmin"), true);
+            } catch (Exception ex) {
+                notify(ex.getMessage(), true);
+            }
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button(i18n.translate("common.cancel"), e -> dialog.close()), save);
+        dialog.open();
+    }
+
+    private void openResetPasswordDialog(User user) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(i18n.translate("view.users.dialog.resetPassword"));
+        dialog.setWidth("380px");
+
+        PasswordField newPassword = new PasswordField(i18n.translate("view.users.field.newPassword"));
+        newPassword.setWidthFull();
+
+        PasswordField confirmPassword = new PasswordField(i18n.translate("view.users.field.confirmPassword"));
+        confirmPassword.setWidthFull();
+
+        dialog.add(new VerticalLayout(newPassword, confirmPassword) {{ setPadding(false); }});
+
+        Button save = new Button(i18n.translate("view.users.button.resetPassword"), e -> {
+            if (newPassword.getValue().isBlank()) {
+                newPassword.setInvalid(true);
+                newPassword.setErrorMessage(i18n.translate("view.users.validation.passwordRequired"));
+                return;
+            }
+            if (!newPassword.getValue().equals(confirmPassword.getValue())) {
+                confirmPassword.setInvalid(true);
+                confirmPassword.setErrorMessage(i18n.translate("view.users.validation.passwordMismatch"));
+                return;
+            }
+            try {
+                userService.resetPassword(user.getId(), newPassword.getValue());
+                dialog.close();
+                notify(i18n.translate("view.users.notification.passwordReset", user.getEmail()), false);
             } catch (Exception ex) {
                 notify(ex.getMessage(), true);
             }

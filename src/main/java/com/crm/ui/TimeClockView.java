@@ -1,7 +1,9 @@
 package com.crm.ui;
 
 import com.crm.repository.UserRepository;
+import com.crm.service.AddonService;
 import com.crm.service.TranslationService;
+import com.crm.service.UserService;
 import com.crm.timetracking.dto.AttendanceReportRequest;
 import com.crm.timetracking.dto.AttendanceReportResponse;
 import com.crm.timetracking.entity.Attendance;
@@ -84,6 +86,8 @@ public class TimeClockView extends VerticalLayout implements HasDynamicTitle {
                          UserRepository userRepository,
                          HolidayRepository holidayRepository,
                          SecurityService securityService,
+                         UserService userService,
+                         AddonService addonService,
                          TranslationService i18n) {
         this.attendanceService = attendanceService;
         this.reportService     = reportService;
@@ -105,6 +109,19 @@ public class TimeClockView extends VerticalLayout implements HasDynamicTitle {
             err.add(new Span(i18n.translate("view.timeClock.error.userNotResolved")));
             add(err);
             return;
+        }
+
+        boolean isAdmin = securityService.hasRole("SUPER_ADMIN") || securityService.hasRole("ADMIN");
+        if (!isAdmin) {
+            Long accountId = userService.getAccountIdByUsername(securityService.getUsername()).orElse(null);
+            if (!addonService.accountHasActiveAddon(accountId, "Time Clock")) {
+                Div denied = card();
+                Span msg = new Span(i18n.translate("view.timeClock.error.noAddon"));
+                msg.getStyle().set("color", "var(--lumo-error-text-color)");
+                denied.add(msg);
+                add(denied);
+                return;
+            }
         }
 
         buildStatusCard();
@@ -453,7 +470,7 @@ public class TimeClockView extends VerticalLayout implements HasDynamicTitle {
         String note = reportNoteField.getValue().isBlank() ? null : reportNoteField.getValue();
         try {
             reportService.createReport(currentUserId,
-                    new AttendanceReportRequest(date, entry, exit, note, type, false));
+                    new AttendanceReportRequest(date, entry, exit, note, type, false, null, null));
             addReportPanel.setVisible(false);
             reportNoteField.clear(); reportEntryPicker.clear(); reportExitPicker.clear();
             refreshLeaveReports();

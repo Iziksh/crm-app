@@ -79,6 +79,11 @@ public class SalesOrderService {
     }
 
     @Transactional(readOnly = true)
+    public List<SalesOrderResponse> findByAccount(Long accountId) {
+        return salesOrderRepository.findByAccount_Id(accountId).stream().map(SalesOrderResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<SalesOrderResponse> findByStatus(SalesOrderStatus status) {
         return salesOrderRepository.findByStatus(status).stream().map(SalesOrderResponse::from).toList();
     }

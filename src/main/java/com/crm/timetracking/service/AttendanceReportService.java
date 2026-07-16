@@ -25,6 +25,9 @@ public class AttendanceReportService {
     // Standard workday = 8 hours = 480 minutes (Israeli labour law baseline).
     private static final int DEFAULT_STANDARD_MINUTES = 480;
 
+    // Israeli overtime law: the first 2 daily overtime hours are paid at 125%, beyond that 150%.
+    private static final int OVERTIME_125_CAP_MINUTES = 120;
+
     private final AttendanceReportRepository reportRepo;
     private final HolidayRepository          holidayRepo;
     private final UserRepository             userRepo;
@@ -111,8 +114,11 @@ public class AttendanceReportService {
                 .orElse("unknown");
 
         List<DayCalendarEntry> days = new ArrayList<>();
-        int totalWorked   = 0;
-        int totalStandard = 0;
+        int totalWorked      = 0;
+        int totalStandard    = 0;
+        int totalRegular     = 0;
+        int totalOvertime125 = 0;
+        int totalOvertime150 = 0;
 
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             DayOfWeek dow       = d.getDayOfWeek();
@@ -124,6 +130,11 @@ public class AttendanceReportService {
             List<AttendanceReport> dayReports = byDate.getOrDefault(d, List.of());
             int worked = computeWorkedMinutes(dayReports, standard);
 
+            int overtimeTotal  = Math.max(0, worked - standard);
+            int overtime125    = Math.min(overtimeTotal, OVERTIME_125_CAP_MINUTES);
+            int overtime150    = overtimeTotal - overtime125;
+            int regular        = worked - overtime125 - overtime150;
+
             days.add(new DayCalendarEntry(
                     d,
                     dayReports.stream().map(AttendanceReportResponse::from).toList(),
@@ -132,16 +143,49 @@ public class AttendanceReportService {
                     isWeekend,
                     isHoliday,
                     isHoliday ? holiday.getName() : null,
-                    worked - standard
+                    worked - standard,
+                    regular,
+                    overtime125,
+                    overtime150
             ));
 
-            totalWorked   += worked;
-            totalStandard += standard;
+            totalWorked      += worked;
+            totalStandard    += standard;
+            totalRegular     += regular;
+            totalOvertime125 += overtime125;
+            totalOvertime150 += overtime150;
         }
 
         return new MonthlyCalendarResponse(
                 userId, username, year, month, days,
-                totalWorked, totalStandard, totalWorked - totalStandard);
+                totalWorked, totalStandard, totalWorked - totalStandard,
+                totalRegular, totalOvertime125, totalOvertime150);
+    }
+
+    // ── MONTHLY SUMMARY (dashboard) ───────────────────────────────────────────
+
+    /**
+     * Days/hours/percentage rollup for the Monthly Summary dashboard — derived from the same
+     * per-day data as {@link #getMonthlyCalendar}, just aggregated differently (days, not hours,
+     * as the primary lens).
+     */
+    @Transactional(readOnly = true)
+    public MonthlySummaryResponse getMonthlySummary(Long userId, int year, int month) {
+        MonthlyCalendarResponse cal = getMonthlyCalendar(userId, year, month);
+
+        int standardDays = (int) cal.days().stream().filter(d -> d.standardMinutes() > 0).count();
+        int actualDays   = (int) cal.days().stream().filter(d -> d.totalWorkedMinutes() > 0).count();
+
+        Double attendancePercent = cal.totalStandardMinutes() > 0
+                ? Math.round(cal.totalWorkedMinutes() * 1000.0 / cal.totalStandardMinutes()) / 10.0
+                : null;
+
+        return new MonthlySummaryResponse(
+                cal.userId(), cal.username(), cal.year(), cal.month(),
+                standardDays, actualDays,
+                cal.totalWorkedMinutes(), cal.totalStandardMinutes(), cal.totalDeltaMinutes(),
+                cal.totalRegularMinutes(), cal.totalOvertime125Minutes(), cal.totalOvertime150Minutes(),
+                attendancePercent);
     }
 
     // ── PRIVATE HELPERS ───────────────────────────────────────────────────────
@@ -213,6 +257,8 @@ public class AttendanceReportService {
         report.setNote(req.note());
         report.setReportType(req.reportType());
         report.setEquateToStandard(req.equateToStandard());
+        report.setWorkType(req.workType());
+        report.setProjectTag(req.projectTag());
         report.setDurationMinutes(
                 (req.entryTime() != null && req.exitTime() != null)
                         ? DurationCalculator.computeMinutes(req.entryTime(), req.exitTime())

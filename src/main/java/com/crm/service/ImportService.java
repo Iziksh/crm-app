@@ -50,7 +50,7 @@ public class ImportService {
                             cols.length > 3 ? cols[3].trim() : null,
                             cols.length > 4 ? cols[4].trim() : null,
                             cols.length > 5 ? cols[5].trim() : null,
-                            null, null, null));
+                            null, null, null, null));
                     imported++;
                 } catch (Exception e) {
                     errors.add("Row " + row + ": " + e.getMessage()); skipped++;

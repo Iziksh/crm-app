@@ -2,17 +2,28 @@ package com.crm.timetracking.controller;
 
 import com.crm.domain.entity.User;
 import com.crm.repository.UserRepository;
+import com.crm.service.UserService;
 import com.crm.timetracking.dto.AttendanceResponse;
+import com.crm.timetracking.dto.CorrectionLogEntryResponse;
+import com.crm.timetracking.entity.Attendance;
+import com.crm.timetracking.enums.AttendanceApprovalStatus;
 import com.crm.timetracking.service.AttendanceService;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
@@ -21,10 +32,13 @@ public class AttendanceController {
 
     private final AttendanceService attendanceService;
     private final UserRepository    userRepository;
+    private final UserService       userService;
 
-    public AttendanceController(AttendanceService attendanceService, UserRepository userRepository) {
+    public AttendanceController(AttendanceService attendanceService, UserRepository userRepository,
+                                UserService userService) {
         this.attendanceService = attendanceService;
         this.userRepository    = userRepository;
+        this.userService       = userService;
     }
 
     record PunchInRequest(String note, String source) {}
@@ -51,7 +65,9 @@ public class AttendanceController {
     }
 
     @GetMapping("/active")
-    public ResponseEntity<AttendanceResponse> getActive(@RequestParam Long userId) {
+    public ResponseEntity<AttendanceResponse> getActive(
+            @RequestParam Long userId, @AuthenticationPrincipal UserDetails userDetails) {
+        guardSelfOrManagerOrAdmin(userId, userDetails);
         return attendanceService.findActiveSession(userId)
                 .map(a -> ResponseEntity.ok(AttendanceResponse.from(a)))
                 .orElse(ResponseEntity.noContent().build());
@@ -61,7 +77,9 @@ public class AttendanceController {
     public ResponseEntity<List<AttendanceResponse>> getMonthly(
             @RequestParam Long userId,
             @RequestParam int year,
-            @RequestParam int month) {
+            @RequestParam int month,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        guardSelfOrManagerOrAdmin(userId, userDetails);
         return ResponseEntity.ok(
                 attendanceService.getMonthlyRecords(userId, year, month).stream()
                         .map(AttendanceResponse::from).toList());
@@ -95,38 +113,109 @@ public class AttendanceController {
 
     // ── MANAGER APPROVAL ──────────────────────────────────────────────────────
 
+    /**
+     * Pending corrections awaiting approval. Full admins see everyone; everyone else sees only
+     * the pending corrections of their own direct reports (empty list if they manage no one).
+     */
     @GetMapping("/pending-approvals")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<List<AttendanceResponse>> pendingApprovals() {
+    public ResponseEntity<List<AttendanceResponse>> pendingApprovals(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Long callerId = resolveUserId(userDetails.getUsername());
+        List<Attendance> pending = isAdmin(userDetails)
+                ? attendanceService.getPendingApprovals()
+                : attendanceService.getPendingApprovalsForUsers(userService.directReportIds(callerId));
         return ResponseEntity.ok(
-                attendanceService.getPendingApprovals().stream()
-                        .map(AttendanceResponse::from)
-                        .collect(Collectors.toList()));
+                pending.stream().map(AttendanceResponse::from).collect(Collectors.toList()));
+    }
+
+    /**
+     * Unified correction log — full history (any status), optional date-range and status filter.
+     * Employees see their own; managers see their team's (plus their own); admins see everyone's
+     * unless {@code userId} narrows it to one person (self/manager/admin guarded either way).
+     */
+    @GetMapping("/corrections")
+    public ResponseEntity<List<CorrectionLogEntryResponse>> searchCorrections(
+            @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) AttendanceApprovalStatus status,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        Long callerId = resolveUserId(userDetails.getUsername());
+        ZoneId zone = ZoneId.of("Asia/Jerusalem");
+        OffsetDateTime fromDt = from != null ? from.atStartOfDay(zone).toOffsetDateTime() : null;
+        OffsetDateTime toDt   = to != null ? to.plusDays(1).atStartOfDay(zone).toOffsetDateTime() : null;
+
+        List<Long> scopeUserIds;
+        if (userId != null) {
+            guardSelfOrManagerOrAdmin(userId, userDetails);
+            scopeUserIds = List.of(userId);
+        } else if (isAdmin(userDetails)) {
+            scopeUserIds = null;
+        } else {
+            scopeUserIds = new ArrayList<>(userService.directReportIds(callerId));
+            scopeUserIds.add(callerId);
+        }
+
+        List<Attendance> results = attendanceService.searchCorrections(scopeUserIds, fromDt, toDt, status);
+
+        Set<Long> namesNeeded = results.stream()
+                .flatMap(a -> java.util.stream.Stream.of(a.getUserId(), a.getApprovedBy()))
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> names = namesNeeded.isEmpty() ? Map.of()
+                : userRepository.findAllById(namesNeeded).stream()
+                        .collect(Collectors.toMap(User::getId, User::getUsername));
+
+        return ResponseEntity.ok(results.stream()
+                .map(a -> CorrectionLogEntryResponse.from(a, names.get(a.getUserId()), names.get(a.getApprovedBy())))
+                .toList());
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<AttendanceResponse> approve(
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails userDetails) {
         Long managerId = resolveUserId(userDetails.getUsername());
+        guardManagerOfRecordOrAdmin(id, managerId, userDetails);
         return ResponseEntity.ok(
                 AttendanceResponse.from(attendanceService.approve(id, managerId)));
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<AttendanceResponse> reject(
             @PathVariable Long id,
             @RequestBody RejectRequest body,
             @AuthenticationPrincipal UserDetails userDetails) {
         Long managerId = resolveUserId(userDetails.getUsername());
+        guardManagerOfRecordOrAdmin(id, managerId, userDetails);
         return ResponseEntity.ok(
                 AttendanceResponse.from(
                         attendanceService.reject(id, managerId, body.reason())));
     }
 
     // ── HELPERS ───────────────────────────────────────────────────────────────
+
+    private void guardSelfOrManagerOrAdmin(Long targetUserId, UserDetails caller) {
+        Long callerId = resolveUserId(caller.getUsername());
+        if (callerId.equals(targetUserId)) return;
+        if (isAdmin(caller)) return;
+        if (userService.isManagerOf(callerId, targetUserId)) return;
+        throw new AccessDeniedException("Access denied.");
+    }
+
+    private void guardManagerOfRecordOrAdmin(Long recordId, Long callerId, UserDetails caller) {
+        if (isAdmin(caller)) return;
+        Long employeeId = attendanceService.getById(recordId).getUserId();
+        if (!userService.isManagerOf(callerId, employeeId)) {
+            throw new AccessDeniedException("You do not manage this employee.");
+        }
+    }
+
+    private boolean isAdmin(UserDetails caller) {
+        return caller.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+    }
 
     private Long resolveUserId(String username) {
         return userRepository.findByUsername(username)

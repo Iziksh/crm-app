@@ -11,6 +11,7 @@ public record ContactRequest(
         String phone,
         String jobTitle,
         String department,
+        String company,
         ContactStatus status,
         String notes,
         Long accountId

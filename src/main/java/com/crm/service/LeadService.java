@@ -106,6 +106,11 @@ public class LeadService {
     }
 
     @Transactional(readOnly = true)
+    public List<LeadResponse> findByAccount(Long accountId) {
+        return leadRepository.findByAccount_Id(accountId).stream().map(LeadResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<LeadResponse> findByStatus(LeadStatus status) {
         return leadRepository.findByStatus(status).stream().map(LeadResponse::from).toList();
     }

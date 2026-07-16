@@ -70,6 +70,11 @@ public class ContractService {
     }
 
     @Transactional(readOnly = true)
+    public List<ContractResponse> findByAccount(Long accountId) {
+        return contractRepository.findByAccount_Id(accountId).stream().map(ContractResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ContractResponse> findByStatus(ContractStatus status) {
         return contractRepository.findByStatus(status).stream().map(ContractResponse::from).toList();
     }

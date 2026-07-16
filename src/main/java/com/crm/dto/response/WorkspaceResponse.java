@@ -1,6 +1,7 @@
 package com.crm.dto.response;
 
 import com.crm.domain.entity.Workspace;
+import com.crm.domain.enums.WorkspaceTaxStatus;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -12,6 +13,7 @@ public record WorkspaceResponse(
         String description,
         int memberCount,
         List<String> memberNames,
+        WorkspaceTaxStatus taxStatus,
         LocalDateTime createdAt
 ) {
     public static WorkspaceResponse from(Workspace w) {
@@ -22,6 +24,7 @@ public record WorkspaceResponse(
                 w.getDescription(),
                 w.getMembers().size(),
                 w.getMembers().stream().map(u -> u.getUsername()).toList(),
+                w.getTaxStatus(),
                 w.getCreatedAt()
         );
     }
