@@ -4,11 +4,12 @@ import com.crm.dto.request.ProductRequest;
 import com.crm.dto.response.ProductResponse;
 import com.crm.service.ProductService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/products")
@@ -26,10 +27,10 @@ public class ProductController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<ProductResponse>> list(
+    public ResponseEntity<List<ProductResponse>> list(
             @RequestParam(required = false) String search,
             Pageable pageable) {
-        return ResponseEntity.ok(productService.findAll(pageable, search, false));
+        return ResponseEntity.ok(productService.findAll(pageable, search, false).getContent());
     }
 
     @GetMapping("/{id}")

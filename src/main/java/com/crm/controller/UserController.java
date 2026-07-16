@@ -5,7 +5,6 @@ import com.crm.dto.request.UserRequest;
 import com.crm.dto.response.UserResponse;
 import com.crm.service.UserService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,10 +33,10 @@ public class UserController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<UserResponse>> list(
+    public ResponseEntity<List<UserResponse>> list(
             @RequestParam(required = false) String search,
             Pageable pageable) {
-        return ResponseEntity.ok(userService.findAll(pageable, search));
+        return ResponseEntity.ok(userService.findAll(pageable, search).getContent());
     }
 
     @GetMapping("/{id}")

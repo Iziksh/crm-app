@@ -3,12 +3,12 @@ package com.crm.controller;
 import com.crm.domain.enums.TaskStatus;
 import com.crm.dto.response.ScheduledTaskResponse;
 import com.crm.service.ScheduledTaskService;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -23,12 +23,12 @@ public class ScheduledTaskController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<ScheduledTaskResponse>> list(
+    public ResponseEntity<List<ScheduledTaskResponse>> list(
             @RequestParam(required = false) TaskStatus status,
             Pageable pageable) {
         return ResponseEntity.ok(status != null
-                ? taskService.findByStatus(status, pageable)
-                : taskService.findAll(pageable));
+                ? taskService.findByStatus(status, pageable).getContent()
+                : taskService.findAll(pageable).getContent());
     }
 
     @GetMapping("/{id}")

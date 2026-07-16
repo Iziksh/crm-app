@@ -36,12 +36,12 @@ public class SalesOrderController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(
+    public ResponseEntity<List<SalesOrderResponse>> list(
             @RequestParam(required = false) SalesOrderStatus status,
             Pageable pageable) {
         if (status != null) return ResponseEntity.ok(salesOrderService.findByStatus(status));
         Page<SalesOrderResponse> page = salesOrderService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")

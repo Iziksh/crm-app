@@ -36,12 +36,12 @@ public class QuoteController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(
+    public ResponseEntity<List<QuoteResponse>> list(
             @RequestParam(required = false) QuoteStatus status,
             Pageable pageable) {
         if (status != null) return ResponseEntity.ok(quoteService.findByStatus(status));
         Page<QuoteResponse> page = quoteService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")

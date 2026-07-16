@@ -28,13 +28,12 @@ public class AccountGroupController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(@RequestParam(required = false) String search, Pageable pageable) {
+    public ResponseEntity<List<AccountGroupResponse>> list(@RequestParam(required = false) String search, Pageable pageable) {
         if (search != null && !search.isBlank()) {
-            List<AccountGroupResponse> results = accountGroupService.search(search);
-            return ResponseEntity.ok(results);
+            return ResponseEntity.ok(accountGroupService.search(search));
         }
         Page<AccountGroupResponse> page = accountGroupService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")

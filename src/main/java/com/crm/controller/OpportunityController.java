@@ -39,12 +39,12 @@ public class OpportunityController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(
+    public ResponseEntity<List<OpportunityResponse>> list(
             @RequestParam(required = false) OpportunityStage stage,
             Pageable pageable) {
         if (stage != null) return ResponseEntity.ok(opportunityService.findByStage(stage));
         Page<OpportunityResponse> page = opportunityService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")

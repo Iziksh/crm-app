@@ -42,14 +42,14 @@ public class ActivityController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(
+    public ResponseEntity<List<ActivityResponse>> list(
             @RequestParam(required = false) ActivityType type,
             @RequestParam(required = false) ActivityStatus status,
             Pageable pageable) {
         if (type != null) return ResponseEntity.ok(activityService.findByType(type));
         if (status != null) return ResponseEntity.ok(activityService.findByStatus(status));
         Page<ActivityResponse> page = activityService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")

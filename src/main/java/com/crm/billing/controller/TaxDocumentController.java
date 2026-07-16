@@ -8,11 +8,12 @@ import com.crm.billing.dto.TaxDocumentResponse;
 import com.crm.billing.service.TaxDocumentDraftService;
 import com.crm.billing.service.TaxDocumentIssueService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/billing/tax-documents")
@@ -32,8 +33,8 @@ public class TaxDocumentController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<TaxDocumentResponse>> list(Pageable pageable) {
-        return ResponseEntity.ok(draftService.findAll(pageable));
+    public ResponseEntity<List<TaxDocumentResponse>> list(Pageable pageable) {
+        return ResponseEntity.ok(draftService.findAll(pageable).getContent());
     }
 
     @GetMapping("/{id}")

@@ -34,12 +34,12 @@ public class ContractController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(
+    public ResponseEntity<List<ContractResponse>> list(
             @RequestParam(required = false) ContractStatus status,
             Pageable pageable) {
         if (status != null) return ResponseEntity.ok(contractService.findByStatus(status));
         Page<ContractResponse> page = contractService.findAll(pageable);
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/{id}")
