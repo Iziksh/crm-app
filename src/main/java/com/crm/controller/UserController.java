@@ -32,7 +32,12 @@ public class UserController {
         return ResponseEntity.ok(userService.findDirectReports(user.getId()));
     }
 
+    /**
+     * Also open to ROLE_HR_MANAGER (unlike the rest of this controller): the attendance pickers
+     * need a way to list company users, but that role should never reach create/update/delete/toggle.
+     */
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('HR_MANAGER')")
     public ResponseEntity<List<UserResponse>> list(
             @RequestParam(required = false) String search,
             Pageable pageable) {

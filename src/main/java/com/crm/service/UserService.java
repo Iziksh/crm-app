@@ -180,6 +180,14 @@ public class UserService {
 
     public UserResponse update(Long id, UserRequest request) {
         User user = getOrThrow(id);
+        if (!request.username().equals(user.getUsername()) && userRepository.existsByUsername(request.username())) {
+            throw new DuplicateEmailException(request.username());
+        }
+        if (request.email() != null && !request.email().equals(user.getEmail())
+                && userRepository.existsByEmail(request.email())) {
+            throw new DuplicateEmailException(request.email());
+        }
+        user.setUsername(request.username());
         user.setEmail(request.email());
         if (request.password() != null && !request.password().isBlank()) {
             user.setPassword(passwordEncoder.encode(request.password()));

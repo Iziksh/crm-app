@@ -34,7 +34,7 @@ public class HolidayController {
     }
 
     @PostMapping("/regenerate")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('HR_MANAGER')")
     public ResponseEntity<String> regenerate(@RequestParam int year) {
         int count = holidayService.generateHolidaysForYear(year).size();
         return ResponseEntity.ok("Regenerated " + count + " holidays for year " + year);

@@ -86,7 +86,7 @@ public class AttendanceController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('HR_MANAGER')")
     public ResponseEntity<AttendanceResponse> editSession(
             @PathVariable Long id,
             @RequestBody EditSessionRequest body) {
@@ -212,9 +212,12 @@ public class AttendanceController {
         }
     }
 
+    // ROLE_HR_MANAGER is a standalone role (not part of the general RoleHierarchy) that grants
+    // company-wide attendance visibility/approval without the broader powers ROLE_ADMIN carries
+    // elsewhere (user management, billing, etc.) — scoped deliberately to this controller only.
     private boolean isAdmin(UserDetails caller) {
         return caller.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_HR_MANAGER"));
     }
 
     private Long resolveUserId(String username) {

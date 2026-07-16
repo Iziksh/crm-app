@@ -32,7 +32,7 @@ public class AdminUserManagementService {
     static final String ROLE_ADMIN         = "ROLE_ADMIN";
 
     private static final Set<String> VALID_COMPANY_ROLES =
-            Set.of("ROLE_COMPANY_ADMIN", "ROLE_USER", "ROLE_SALES", "ROLE_SUPPORT");
+            Set.of("ROLE_COMPANY_ADMIN", "ROLE_USER", "ROLE_SALES", "ROLE_SUPPORT", "ROLE_HR_MANAGER");
 
     private final UserRepository      userRepository;
     private final WorkspaceRepository workspaceRepository;

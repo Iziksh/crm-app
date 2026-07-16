@@ -82,9 +82,11 @@ public class AttendanceMonthLockController {
         }
     }
 
+    // See AttendanceController.isAdmin — ROLE_HR_MANAGER grants company-wide attendance access
+    // without the broader ROLE_ADMIN powers elsewhere; deliberately not part of the RoleHierarchy.
     private boolean isAdmin(UserDetails caller) {
         return caller.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_HR_MANAGER"));
     }
 
     private Long resolveUserId(String username) {
