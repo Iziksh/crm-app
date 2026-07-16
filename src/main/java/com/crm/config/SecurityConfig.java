@@ -1,11 +1,8 @@
 package com.crm.config;
 
 import com.crm.security.JwtAuthenticationFilter;
-import com.crm.ui.LoginView;
-import com.vaadin.flow.spring.security.VaadinWebSecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -21,7 +18,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -31,7 +27,7 @@ import java.util.List;
 @EnableWebSecurity
 @EnableMethodSecurity
 @Configuration
-public class SecurityConfig extends VaadinWebSecurity {
+public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final UserDetailsService userDetailsService;
@@ -44,16 +40,18 @@ public class SecurityConfig extends VaadinWebSecurity {
         this.roleHierarchy = roleHierarchy;
     }
 
-    /** Highest-priority chain: handles all /api/** with stateless JWT auth. */
+    /**
+     * Single chain for the whole app — the backend is API-only now that the Vaadin UI is gone,
+     * so there's no separate session-based chain to keep alongside this stateless JWT one.
+     */
     @Bean
-    @Order(1)
     public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
         http
-            .securityMatcher("/api/**")
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(apiCorsConfigurationSource()))
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/api/v1/auth/me").authenticated()
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/admin/users/verify-invite").permitAll()
@@ -73,19 +71,6 @@ public class SecurityConfig extends VaadinWebSecurity {
             .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
-    }
-
-    /** Vaadin UI chain — VaadinWebSecurity handles the rest (lower priority). */
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http
-            .authenticationProvider(authenticationProvider())
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-            );
-        super.configure(http);
-        setLoginView(http, LoginView.class);
-        http.csrf(csrf -> csrf.ignoringRequestMatchers(new AntPathRequestMatcher("/login", "POST")));
     }
 
     /**
