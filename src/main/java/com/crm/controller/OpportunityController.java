@@ -41,9 +41,9 @@ public class OpportunityController {
     @GetMapping
     public ResponseEntity<List<OpportunityResponse>> list(
             @RequestParam(required = false) OpportunityStage stage,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (stage != null) return ResponseEntity.ok(opportunityService.findByStage(stage));
-        Page<OpportunityResponse> page = opportunityService.findAll(pageable);
+        Page<OpportunityResponse> page = opportunityService.findAll(pageable, stage, null, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

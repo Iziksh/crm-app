@@ -11,6 +11,7 @@ import com.crm.exception.DuplicateEmailException;
 import com.crm.exception.ResourceNotFoundException;
 import com.crm.repository.AccountRepository;
 import com.crm.repository.UserRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -108,11 +110,27 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public Page<UserResponse> findAll(Pageable pageable, String search) {
-        Page<User> page = (search != null && !search.isBlank())
-                ? userRepository.findByUsernameContainingIgnoreCaseOrEmailContainingIgnoreCase(search, search, pageable)
-                : userRepository.findAll(pageable);
+        return findAll(pageable, search, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<UserResponse> findAll(Pageable pageable, String search, Long accountId) {
+        Page<User> page = userRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
+            if (search != null && !search.isBlank()) {
+                String q = "%" + search.toLowerCase() + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("username")), q),
+                        cb.like(cb.lower(root.get("email")), q)));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        }, pageable);
         Map<Long, String> managerNames = resolveManagerNames(page.getContent());
-        return page.map(u -> UserResponse.from(u, managerNames.get(u.getManagerId())));
+        Map<Long, String> accountNames = resolveAccountNames(page.getContent());
+        return page.map(u -> UserResponse.from(u,
+                managerNames.get(u.getManagerId()),
+                u.getAccount() != null ? accountNames.get(u.getAccount().getId()) : null));
     }
 
     @Transactional(readOnly = true)
@@ -139,14 +157,37 @@ public class UserService {
         if (request.managerId() != null && !userRepository.existsById(request.managerId())) {
             throw new ResourceNotFoundException("User", "id", request.managerId());
         }
+        Set<String> roles = request.roles() != null && !request.roles().isEmpty()
+                ? request.roles() : Set.of("ROLE_USER");
+        // Global admins stay accountless; everyone else — including COMPANY_ADMIN, scoped to its
+        // own company — must belong to an account.
+        Account account = null;
+        if (!isGlobalAdmin(roles)) {
+            if (request.accountId() == null) {
+                throw new BadRequestException("An account must be assigned when creating a user");
+            }
+            account = accountRepository.findById(request.accountId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Account", "id", request.accountId()));
+        }
         User user = new User();
         user.setUsername(request.username());
         user.setEmail(request.email());
         user.setPassword(passwordEncoder.encode(
                 request.password() != null && !request.password().isBlank() ? request.password() : "changeme"));
-        user.setRoles(request.roles() != null && !request.roles().isEmpty() ? request.roles() : Set.of("ROLE_USER"));
+        user.setRoles(roles);
         user.setManagerId(request.managerId());
-        return UserResponse.from(userRepository.save(user), resolveManagerName(request.managerId()));
+        user.setAccount(account);
+        return UserResponse.from(userRepository.save(user),
+                resolveManagerName(request.managerId()), account != null ? account.getName() : null);
+    }
+
+    /**
+     * Global admins are platform-wide and stay accountless: ROLE_ADMIN and ROLE_SUPER_ADMIN.
+     * COMPANY_ADMIN is deliberately excluded — it administers one company and is account-scoped
+     * like an ordinary user, so it must have an account.
+     */
+    private boolean isGlobalAdmin(Set<String> roles) {
+        return roles != null && (roles.contains("ROLE_ADMIN") || roles.contains("ROLE_SUPER_ADMIN"));
     }
 
     public void resetPassword(Long id, String newPassword) {
@@ -202,7 +243,18 @@ public class UserService {
             throw new ResourceNotFoundException("User", "id", request.managerId());
         }
         user.setManagerId(request.managerId());
-        return UserResponse.from(userRepository.save(user), resolveManagerName(request.managerId()));
+        if (isGlobalAdmin(user.getRoles())) {
+            // Global admins never carry an account, even if one was previously set or is sent.
+            user.setAccount(null);
+        } else if (request.accountId() != null) {
+            // Reassignment is allowed, but an existing assignment is never cleared by omission —
+            // users predating mandatory assignment can still be edited without picking an account.
+            user.setAccount(accountRepository.findById(request.accountId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Account", "id", request.accountId())));
+        }
+        User saved = userRepository.save(user);
+        return UserResponse.from(saved, resolveManagerName(request.managerId()),
+                saved.getAccount() != null ? saved.getAccount().getName() : null);
     }
 
     public UserResponse toggleEnabled(Long id) {
@@ -280,6 +332,19 @@ public class UserService {
     private String resolveManagerName(Long managerId) {
         if (managerId == null) return null;
         return userRepository.findById(managerId).map(User::getUsername).orElse(null);
+    }
+
+    /**
+     * Batch-loads account names for a page of users. Reading {@code getAccount().getId()} only
+     * touches the proxy's identifier, so this stays at one extra query rather than one per row.
+     */
+    private Map<Long, String> resolveAccountNames(List<User> users) {
+        Set<Long> accountIds = users.stream()
+                .map(User::getAccount).filter(Objects::nonNull)
+                .map(Account::getId).collect(Collectors.toSet());
+        if (accountIds.isEmpty()) return new java.util.HashMap<>();
+        return accountRepository.findAllById(accountIds).stream()
+                .collect(Collectors.toMap(Account::getId, Account::getName));
     }
 
     private Map<Long, String> resolveManagerNames(List<User> users) {

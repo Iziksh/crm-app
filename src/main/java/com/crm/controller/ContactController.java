@@ -44,11 +44,9 @@ public class ContactController {
 
     @GetMapping
     public ResponseEntity<List<ContactResponse>> list(
-            @RequestParam(required = false) String search, Pageable pageable) {
-        if (search != null && !search.isBlank()) {
-            return ResponseEntity.ok(contactService.search(search, pageable).getContent());
-        }
-        return ResponseEntity.ok(contactService.findAll(pageable).getContent());
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long accountId, Pageable pageable) {
+        return ResponseEntity.ok(contactService.findAll(pageable, search, accountId).getContent());
     }
 
     @GetMapping("/{id}")

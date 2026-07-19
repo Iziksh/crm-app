@@ -41,9 +41,9 @@ public class LeadController {
     @GetMapping
     public ResponseEntity<List<LeadResponse>> list(
             @RequestParam(required = false) LeadStatus status,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (status != null) return ResponseEntity.ok(leadService.findByStatus(status));
-        Page<LeadResponse> page = leadService.findAll(pageable);
+        Page<LeadResponse> page = leadService.findAll(pageable, status, null, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

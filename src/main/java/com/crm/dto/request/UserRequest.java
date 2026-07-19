@@ -10,5 +10,7 @@ public record UserRequest(
         @Email String email,
         String password,
         Set<String> roles,
-        Long managerId
+        Long managerId,
+        /** Required on create — every user must belong to an account. */
+        Long accountId
 ) {}

@@ -38,9 +38,9 @@ public class QuoteController {
     @GetMapping
     public ResponseEntity<List<QuoteResponse>> list(
             @RequestParam(required = false) QuoteStatus status,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (status != null) return ResponseEntity.ok(quoteService.findByStatus(status));
-        Page<QuoteResponse> page = quoteService.findAll(pageable);
+        Page<QuoteResponse> page = quoteService.findAll(pageable, status, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

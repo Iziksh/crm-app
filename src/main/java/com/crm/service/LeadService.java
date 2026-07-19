@@ -77,18 +77,24 @@ public class LeadService {
 
     @Transactional(readOnly = true)
     public Page<LeadResponse> findAll(Pageable pageable, LeadStatus status, String search) {
-        return leadRepository.findAll(buildSpec(status, search), pageable).map(LeadResponse::from);
+        return findAll(pageable, status, search, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LeadResponse> findAll(Pageable pageable, LeadStatus status, String search, Long accountId) {
+        return leadRepository.findAll(buildSpec(status, search, accountId), pageable).map(LeadResponse::from);
     }
 
     @Transactional(readOnly = true)
     public long count(LeadStatus status, String search) {
-        return leadRepository.count(buildSpec(status, search));
+        return leadRepository.count(buildSpec(status, search, null));
     }
 
-    private Specification<Lead> buildSpec(LeadStatus status, String search) {
+    private Specification<Lead> buildSpec(LeadStatus status, String search, Long accountId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
             if (search != null && !search.isBlank()) {
                 String pattern = "%" + search.toLowerCase() + "%";
                 predicates.add(cb.or(
@@ -102,7 +108,7 @@ public class LeadService {
 
     @Transactional(readOnly = true)
     public List<LeadResponse> findAllForExport(LeadStatus status, String search) {
-        return leadRepository.findAll(buildSpec(status, search)).stream().map(LeadResponse::from).toList();
+        return leadRepository.findAll(buildSpec(status, search, null)).stream().map(LeadResponse::from).toList();
     }
 
     @Transactional(readOnly = true)

@@ -16,11 +16,13 @@ import com.crm.repository.ContractRepository;
 import com.crm.repository.QuoteRepository;
 import com.crm.repository.SalesOrderRepository;
 import com.crm.repository.UserRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -67,10 +69,17 @@ public class SalesOrderService {
 
     @Transactional(readOnly = true)
     public Page<SalesOrderResponse> findAll(Pageable pageable, SalesOrderStatus status) {
-        if (status != null) {
-            return salesOrderRepository.findByStatus(status, pageable).map(SalesOrderResponse::from);
-        }
-        return salesOrderRepository.findAll(pageable).map(SalesOrderResponse::from);
+        return findAll(pageable, status, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SalesOrderResponse> findAll(Pageable pageable, SalesOrderStatus status, Long accountId) {
+        return salesOrderRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
+            return cb.and(predicates.toArray(Predicate[]::new));
+        }, pageable).map(SalesOrderResponse::from);
     }
 
     @Transactional(readOnly = true)

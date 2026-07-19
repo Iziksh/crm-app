@@ -36,9 +36,9 @@ public class ContractController {
     @GetMapping
     public ResponseEntity<List<ContractResponse>> list(
             @RequestParam(required = false) ContractStatus status,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (status != null) return ResponseEntity.ok(contractService.findByStatus(status));
-        Page<ContractResponse> page = contractService.findAll(pageable);
+        Page<ContractResponse> page = contractService.findAll(pageable, status, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

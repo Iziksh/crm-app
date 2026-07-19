@@ -40,8 +40,25 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('HR_MANAGER')")
     public ResponseEntity<List<UserResponse>> list(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long accountId,
+            @AuthenticationPrincipal User currentUser,
             Pageable pageable) {
-        return ResponseEntity.ok(userService.findAll(pageable, search).getContent());
+        // A COMPANY_ADMIN is locked to its own company: force the account filter to its own account,
+        // ignoring any requested value. Global admins (ADMIN/SUPER_ADMIN) and HR_MANAGER filter freely.
+        if (isCompanyAdmin(currentUser)) {
+            // A company admin with no account (shouldn't happen — creation requires one) sees nobody,
+            // rather than falling through to an unscoped list. -1 matches no account id.
+            accountId = currentUser.getAccount() != null ? currentUser.getAccount().getId() : -1L;
+        }
+        return ResponseEntity.ok(userService.findAll(pageable, search, accountId).getContent());
+    }
+
+    /** COMPANY_ADMIN with no higher global-admin role — company-scoped rather than platform-wide. */
+    private boolean isCompanyAdmin(User user) {
+        if (user == null || user.getRoles() == null) return false;
+        return user.getRoles().contains("ROLE_COMPANY_ADMIN")
+                && !user.getRoles().contains("ROLE_ADMIN")
+                && !user.getRoles().contains("ROLE_SUPER_ADMIN");
     }
 
     @GetMapping("/{id}")

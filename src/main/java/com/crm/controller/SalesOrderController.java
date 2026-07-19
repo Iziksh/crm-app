@@ -38,9 +38,9 @@ public class SalesOrderController {
     @GetMapping
     public ResponseEntity<List<SalesOrderResponse>> list(
             @RequestParam(required = false) SalesOrderStatus status,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (status != null) return ResponseEntity.ok(salesOrderService.findByStatus(status));
-        Page<SalesOrderResponse> page = salesOrderService.findAll(pageable);
+        Page<SalesOrderResponse> page = salesOrderService.findAll(pageable, status, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

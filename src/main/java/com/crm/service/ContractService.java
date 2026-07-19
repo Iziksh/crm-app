@@ -10,12 +10,14 @@ import com.crm.repository.ContactRepository;
 import com.crm.repository.ContractRepository;
 import com.crm.repository.SalesOrderRepository;
 import com.crm.repository.UserRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -58,10 +60,17 @@ public class ContractService {
 
     @Transactional(readOnly = true)
     public Page<ContractResponse> findAll(Pageable pageable, ContractStatus status) {
-        if (status != null) {
-            return contractRepository.findByStatus(status, pageable).map(ContractResponse::from);
-        }
-        return contractRepository.findAll(pageable).map(ContractResponse::from);
+        return findAll(pageable, status, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ContractResponse> findAll(Pageable pageable, ContractStatus status, Long accountId) {
+        return contractRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
+            return cb.and(predicates.toArray(Predicate[]::new));
+        }, pageable).map(ContractResponse::from);
     }
 
     @Transactional(readOnly = true)

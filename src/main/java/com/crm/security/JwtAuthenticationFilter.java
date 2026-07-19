@@ -1,6 +1,7 @@
 package com.crm.security;
 
 import com.crm.service.JwtService;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,19 +45,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         final String token = authHeader.substring(7);
-        final String username = jwtService.extractUsername(token);
+        // An expired/malformed token is an authentication failure, not a server error: swallow the
+        // JwtException, leave the context unauthenticated, and let the chain return 401 downstream
+        // instead of surfacing a 500 with a full stacktrace.
+        try {
+            final String username = jwtService.extractUsername(token);
 
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-            if (jwtService.isTokenValid(token, userDetails)) {
-                // Expand via the role hierarchy (SUPER_ADMIN > COMPANY_ADMIN > ADMIN > ...) so JWT-based
-                // REST requests get the same effective authorities as session-based Vaadin login, which
-                // applies this same hierarchy through the AuthenticationProvider's authoritiesMapper.
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, roleHierarchy.getReachableGrantedAuthorities(userDetails.getAuthorities()));
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                if (jwtService.isTokenValid(token, userDetails)) {
+                    // Expand via the role hierarchy (SUPER_ADMIN > COMPANY_ADMIN > ADMIN > ...) so JWT-based
+                    // REST requests get the same effective authorities as session-based Vaadin login, which
+                    // applies this same hierarchy through the AuthenticationProvider's authoritiesMapper.
+                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                            userDetails, null, roleHierarchy.getReachableGrantedAuthorities(userDetails.getAuthorities()));
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
             }
+        } catch (JwtException ex) {
+            // Invalid token — proceed unauthenticated. Debug-level, since expiry is routine.
+            logger.debug("Ignoring invalid JWT: " + ex.getMessage());
         }
         filterChain.doFilter(request, response);
     }

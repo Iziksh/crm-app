@@ -47,11 +47,10 @@ public class AccountController {
     }
 
     @GetMapping
-    public ResponseEntity<List<AccountResponse>> list(@RequestParam(required = false) String search, Pageable pageable) {
-        if (search != null && !search.isBlank()) {
-            return ResponseEntity.ok(accountService.search(search));
-        }
-        Page<AccountResponse> page = accountService.findAll(pageable);
+    public ResponseEntity<List<AccountResponse>> list(@RequestParam(required = false) String search,
+                                                      @RequestParam(required = false) Long accountId,
+                                                      Pageable pageable) {
+        Page<AccountResponse> page = accountService.findAllScoped(pageable, search, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

@@ -45,10 +45,9 @@ public class ActivityController {
     public ResponseEntity<List<ActivityResponse>> list(
             @RequestParam(required = false) ActivityType type,
             @RequestParam(required = false) ActivityStatus status,
+            @RequestParam(required = false) Long accountId,
             Pageable pageable) {
-        if (type != null) return ResponseEntity.ok(activityService.findByType(type));
-        if (status != null) return ResponseEntity.ok(activityService.findByStatus(status));
-        Page<ActivityResponse> page = activityService.findAll(pageable);
+        Page<ActivityResponse> page = activityService.findAll(pageable, type, status, null, accountId);
         return ResponseEntity.ok(page.getContent());
     }
 

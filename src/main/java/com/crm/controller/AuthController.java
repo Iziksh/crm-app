@@ -11,6 +11,8 @@ import com.crm.dto.request.VerifySignupRequest;
 import com.crm.dto.response.AuthResponse;
 import com.crm.dto.response.LoginResponse;
 import com.crm.dto.response.MeResponse;
+import com.crm.domain.entity.Account;
+import com.crm.repository.AccountRepository;
 import com.crm.exception.InvalidOtpException;
 import com.crm.exception.NoDeliverableEmailException;
 import com.crm.exception.ResourceNotFoundException;
@@ -45,12 +47,15 @@ public class AuthController {
     private final OtpService otpService;
     private final EmailService emailService;
     private final DeviceTrustService deviceTrustService;
+    private final AccountRepository accountRepository;
 
     public AuthController(UserService userService, JwtService jwtService,
                            AuthenticationManager authenticationManager,
                            RegistrationService registrationService,
                            OtpService otpService, EmailService emailService,
-                           DeviceTrustService deviceTrustService) {
+                           DeviceTrustService deviceTrustService,
+                           AccountRepository accountRepository) {
+        this.accountRepository = accountRepository;
         this.userService = userService;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
@@ -151,7 +156,9 @@ public class AuthController {
      * only hold a username/email from the login response but need the numeric id for other calls. */
     @GetMapping("/me")
     public ResponseEntity<MeResponse> me(@AuthenticationPrincipal User user) {
-        return ResponseEntity.ok(MeResponse.from(user));
+        String accountName = user.getAccount() == null ? null
+                : accountRepository.findById(user.getAccount().getId()).map(Account::getName).orElse(null);
+        return ResponseEntity.ok(MeResponse.from(user, accountName));
     }
 
     private static String maskEmail(String email) {

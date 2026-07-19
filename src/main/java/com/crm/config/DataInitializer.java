@@ -94,6 +94,7 @@ public class DataInitializer implements ApplicationRunner {
         // SUPER_ADMIN accounts are skipped: null workspaceId is their intentional "operates across
         // all workspaces" state (see User.workspaceId javadoc), not a data gap to fix.
         backfillMissingPrimaryWorkspace();
+        clearAdminAccounts();
 
         StartupPerformanceProfiler.time("phase.data-initializer.topics", this::seedTopics);
         StartupPerformanceProfiler.time("phase.data-initializer.notification-configs", this::seedNotificationConfigs);
@@ -106,6 +107,21 @@ public class DataInitializer implements ApplicationRunner {
                 user.setWorkspaceId(ws.getId());
                 userRepository.save(user);
             });
+        }
+    }
+
+    // Global admins (ADMIN, SUPER_ADMIN) are platform-wide and must stay accountless
+    // (see UserService.isGlobalAdmin). COMPANY_ADMIN is excluded — it is company-scoped and keeps
+    // its account. Runs every startup so an account left on a global admin is healed back to null.
+    private void clearAdminAccounts() {
+        for (User user : userRepository.findAll()) {
+            Set<String> roles = user.getRoles();
+            boolean globalAdmin = roles != null
+                    && (roles.contains("ROLE_ADMIN") || roles.contains("ROLE_SUPER_ADMIN"));
+            if (globalAdmin && user.getAccount() != null) {
+                user.setAccount(null);
+                userRepository.save(user);
+            }
         }
     }
 

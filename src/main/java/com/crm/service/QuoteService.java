@@ -17,11 +17,13 @@ import com.crm.repository.OpportunityRepository;
 import com.crm.repository.QuoteRepository;
 import com.crm.repository.SalesOrderRepository;
 import com.crm.repository.UserRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -68,10 +70,17 @@ public class QuoteService {
 
     @Transactional(readOnly = true)
     public Page<QuoteResponse> findAll(Pageable pageable, QuoteStatus status) {
-        if (status != null) {
-            return quoteRepository.findByStatus(status, pageable).map(QuoteResponse::from);
-        }
-        return quoteRepository.findAll(pageable).map(QuoteResponse::from);
+        return findAll(pageable, status, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<QuoteResponse> findAll(Pageable pageable, QuoteStatus status, Long accountId) {
+        return quoteRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
+            return cb.and(predicates.toArray(Predicate[]::new));
+        }, pageable).map(QuoteResponse::from);
     }
 
     @Transactional(readOnly = true)

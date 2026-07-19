@@ -98,19 +98,27 @@ public class ActivityService {
 
     @Transactional(readOnly = true)
     public Page<ActivityResponse> findAll(Pageable pageable, ActivityType type, ActivityStatus status, String search) {
-        return activityRepository.findAll(buildSpec(type, status, search), pageable).map(ActivityResponse::from);
+        return findAll(pageable, type, status, search, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ActivityResponse> findAll(Pageable pageable, ActivityType type, ActivityStatus status,
+                                          String search, Long accountId) {
+        return activityRepository.findAll(buildSpec(type, status, search, accountId), pageable)
+                .map(ActivityResponse::from);
     }
 
     @Transactional(readOnly = true)
     public long count(ActivityType type, ActivityStatus status, String search) {
-        return activityRepository.count(buildSpec(type, status, search));
+        return activityRepository.count(buildSpec(type, status, search, null));
     }
 
-    private Specification<Activity> buildSpec(ActivityType type, ActivityStatus status, String search) {
+    private Specification<Activity> buildSpec(ActivityType type, ActivityStatus status, String search, Long accountId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (type != null) predicates.add(cb.equal(root.get("type"), type));
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
             if (search != null && !search.isBlank()) {
                 predicates.add(cb.like(cb.lower(root.get("title")), "%" + search.toLowerCase() + "%"));
             }
@@ -120,7 +128,7 @@ public class ActivityService {
 
     @Transactional(readOnly = true)
     public List<ActivityResponse> findAllForExport(ActivityType type, ActivityStatus status, String search) {
-        return activityRepository.findAll(buildSpec(type, status, search)).stream().map(ActivityResponse::from).toList();
+        return activityRepository.findAll(buildSpec(type, status, search, null)).stream().map(ActivityResponse::from).toList();
     }
 
     @Transactional(readOnly = true)

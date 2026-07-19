@@ -11,6 +11,7 @@ import com.crm.repository.ContactRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,24 +54,23 @@ public class ContactService {
 
     @Transactional(readOnly = true)
     public Page<ContactResponse> findAll(Pageable pageable) {
-        if (workspaceContext.isAdmin()) {
-            return contactRepository.findAll(pageable).map(ContactResponse::from);
-        }
-        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
-        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
-        return contactRepository.findByWorkspace_IdIn(wsIds, pageable).map(ContactResponse::from);
+        return findAll(pageable, null, null);
     }
 
     @Transactional(readOnly = true)
     public Page<ContactResponse> search(String name, Pageable pageable) {
-        if (workspaceContext.isAdmin()) {
-            return contactRepository
-                    .findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCase(name, name, pageable)
-                    .map(ContactResponse::from);
-        }
-        List<Long> wsIds = workspaceContext.currentUserWorkspaceIds();
-        if (wsIds.isEmpty()) return new PageImpl<>(List.of(), pageable, 0);
-        return contactRepository.searchByWorkspaceIds(name, wsIds, pageable).map(ContactResponse::from);
+        return findAll(pageable, name, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ContactResponse> findAll(Pageable pageable, String search, Long accountId) {
+        return contactRepository.findAll(scopeSpec(search, accountId), pageable).map(ContactResponse::from);
+    }
+
+    private Specification<Contact> scopeSpec(String search, Long accountId) {
+        boolean isAdmin = workspaceContext.isAdmin();
+        List<Long> wsIds = isAdmin ? List.of() : workspaceContext.currentUserWorkspaceIds();
+        return ScopeSpecs.scoped(isAdmin, wsIds, accountId, search, "firstName", "lastName");
     }
 
     @Transactional(readOnly = true)

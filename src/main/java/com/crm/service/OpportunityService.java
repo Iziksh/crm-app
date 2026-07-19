@@ -74,18 +74,25 @@ public class OpportunityService {
 
     @Transactional(readOnly = true)
     public Page<OpportunityResponse> findAll(Pageable pageable, OpportunityStage stage, String search) {
-        return opportunityRepository.findAll(buildSpec(stage, search), pageable).map(OpportunityResponse::from);
+        return findAll(pageable, stage, search, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<OpportunityResponse> findAll(Pageable pageable, OpportunityStage stage, String search, Long accountId) {
+        return opportunityRepository.findAll(buildSpec(stage, search, accountId), pageable)
+                .map(OpportunityResponse::from);
     }
 
     @Transactional(readOnly = true)
     public long count(OpportunityStage stage, String search) {
-        return opportunityRepository.count(buildSpec(stage, search));
+        return opportunityRepository.count(buildSpec(stage, search, null));
     }
 
-    private Specification<Opportunity> buildSpec(OpportunityStage stage, String search) {
+    private Specification<Opportunity> buildSpec(OpportunityStage stage, String search, Long accountId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (stage != null) predicates.add(cb.equal(root.get("stage"), stage));
+            if (accountId != null) predicates.add(cb.equal(root.get("account").get("id"), accountId));
             if (search != null && !search.isBlank()) {
                 predicates.add(cb.like(cb.lower(root.get("name")), "%" + search.toLowerCase() + "%"));
             }
@@ -95,7 +102,7 @@ public class OpportunityService {
 
     @Transactional(readOnly = true)
     public List<OpportunityResponse> findAllForExport(OpportunityStage stage, String search) {
-        return opportunityRepository.findAll(buildSpec(stage, search)).stream().map(OpportunityResponse::from).toList();
+        return opportunityRepository.findAll(buildSpec(stage, search, null)).stream().map(OpportunityResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
