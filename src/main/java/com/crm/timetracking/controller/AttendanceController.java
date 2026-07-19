@@ -41,7 +41,7 @@ public class AttendanceController {
         this.userService       = userService;
     }
 
-    record PunchInRequest(String note, String source) {}
+    record PunchInRequest(String note, String source, Boolean force) {}
     record EditSessionRequest(OffsetDateTime newStart, OffsetDateTime newEnd) {}
     record ManualEntryRequest(OffsetDateTime startTime, OffsetDateTime endTime, String note) {}
     record RejectRequest(String reason) {}
@@ -50,11 +50,12 @@ public class AttendanceController {
     public ResponseEntity<AttendanceResponse> punchIn(
             @RequestBody(required = false) PunchInRequest body,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Long   userId = resolveUserId(userDetails.getUsername());
-        String note   = body != null ? body.note()   : null;
-        String source = body != null ? body.source() : "MANUAL";
+        Long    userId = resolveUserId(userDetails.getUsername());
+        String  note   = body != null ? body.note()   : null;
+        String  source = body != null ? body.source() : "MANUAL";
+        boolean force  = body != null && Boolean.TRUE.equals(body.force());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(AttendanceResponse.from(attendanceService.punchIn(userId, note, source)));
+                .body(AttendanceResponse.from(attendanceService.punchIn(userId, note, source, force)));
     }
 
     @PostMapping("/punch-out")
@@ -62,6 +63,19 @@ public class AttendanceController {
             @AuthenticationPrincipal UserDetails userDetails) {
         Long userId = resolveUserId(userDetails.getUsername());
         return ResponseEntity.ok(AttendanceResponse.from(attendanceService.punchOut(userId)));
+    }
+
+    /**
+     * Records a clock-out with no matching clock-in. Called when the employee confirms "Clock out"
+     * despite having no open session (no clock-in today, or an existing incomplete clock-out line).
+     * Produces an incomplete line (no total) to be corrected later.
+     */
+    @PostMapping("/clock-out-line")
+    public ResponseEntity<AttendanceResponse> clockOutLine(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Long userId = resolveUserId(userDetails.getUsername());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(AttendanceResponse.from(attendanceService.createClockOutLine(userId)));
     }
 
     @GetMapping("/active")
