@@ -189,7 +189,7 @@ class AdminUserManagementServiceTest {
 
         assertThatThrownBy(() -> service.removeUser(2L, actor))
                 .isInstanceOf(LastAdminException.class);
-        verify(userRepository, never()).delete(any());
+        verify(userRepository, never()).delete(any(User.class));
     }
 
     // ── Cross-tenant enforcement ──────────────────────────────────────────

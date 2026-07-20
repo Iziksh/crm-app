@@ -24,6 +24,7 @@ import com.crm.service.OtpService;
 import com.crm.service.RegistrationService;
 import com.crm.service.UserService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -48,6 +49,10 @@ public class AuthController {
     private final EmailService emailService;
     private final DeviceTrustService deviceTrustService;
     private final AccountRepository accountRepository;
+
+    /** Login 2FA gate. Enabled by default; disabled in the dev profile for a frictionless local login. */
+    @Value("${auth.login-2fa-enabled:true}")
+    private boolean login2faEnabled;
 
     public AuthController(UserService userService, JwtService jwtService,
                            AuthenticationManager authenticationManager,
@@ -85,6 +90,13 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(request.username(), request.password()));
         UserDetails userDetails = (UserDetails) auth.getPrincipal();
         User user = (User) userDetails;
+
+        // Dev convenience: with 2FA disabled (application-dev.properties), skip the emailed OTP
+        // entirely and issue a JWT straight away. Defaults to enabled everywhere else.
+        if (!login2faEnabled) {
+            String token = jwtService.generateToken(userDetails);
+            return ResponseEntity.ok(LoginResponse.success(token, user.getUsername(), user.getEmail(), null));
+        }
 
         String email = userService.findDeliverableEmailByUsername(user.getUsername())
                 .orElseThrow(() -> new NoDeliverableEmailException(user.getUsername()));

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CRM — Role Authorization</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --border: #e6e9ef;
+    --text: #23252b;
+    --muted: #676879;
+    --faint: #9699a6;
+    --head: #eef1f7;
+    --accent: #0073ea;
+    --yes-bg: #e6faf2; --yes-fg: #067a52;
+    --no-bg: #fce8ea;  --no-fg: #b3243b;
+    --warn-bg: #fff3e2; --warn-fg: #9a5a12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14151a; --surface: #1c1e26; --border: #2c2f3a;
+      --text: #eceef2; --muted: #a7abb8; --faint: #767a88; --head: #22252f;
+      --yes-bg: #123626; --yes-fg: #4fd6a0;
+      --no-bg: #3a1b21; --no-fg: #f38ea0;
+      --warn-bg: #3a2c14; --warn-fg: #f0c179;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 26px; letter-spacing: -0.3px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 15px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin: 34px 0 12px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 760px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th { background: var(--head); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .role { font-weight: 700; white-space: nowrap; }
+  .role small { display: block; font-weight: 500; color: var(--faint); font-size: 11px; text-transform: none; letter-spacing: 0; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 100px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .yes { background: var(--yes-bg); color: var(--yes-fg); }
+  .no  { background: var(--no-bg);  color: var(--no-fg); }
+  .warn{ background: var(--warn-bg); color: var(--warn-fg); }
+  code { background: color-mix(in srgb, var(--faint) 22%, transparent); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  ul.notes { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
+  ul.notes li { margin: 5px 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0 0; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  footer { margin-top: 36px; color: var(--faint); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Role Authorization</h1>
+  <p class="sub">Who each role can see and manage, and how the account (company) scope applies. Hierarchy: <code>SUPER_ADMIN &gt; COMPANY_ADMIN &gt; ADMIN &gt; SALES / SUPPORT / USER</code>. <code>HR_MANAGER</code> is standalone (not in the hierarchy).</p>
+
+  <h2>Account &amp; data scope</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Account</th>
+          <th>Data scope</th>
+          <th>Users table</th>
+          <th>Account selector</th>
+          <th>Manage users</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="role">SUPER_ADMIN</td>
+          <td><span class="pill no">None</span></td>
+          <td>Platform-wide (all companies)</td>
+          <td>All users</td>
+          <td><span class="pill yes">Visible · all</span></td>
+          <td><span class="pill yes">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="role">ADMIN</td>
+          <td><span class="pill no">None</span></td>
+          <td>Global <sup>1</sup></td>
+          <td>All users</td>
+          <td><span class="pill yes">Visible · all</span></td>
+          <td><span class="pill yes">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="role">COMPANY_ADMIN <small>admin of one company</small></td>
+          <td><span class="pill warn">Required</span></td>
+          <td>Own company only</td>
+          <td><span class="pill warn">Own company only</span></td>
+          <td><span class="pill warn">Visible · locked <sup>2</sup></span></td>
+          <td><span class="pill yes">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="role">HR_MANAGER <small>time / attendance only</small></td>
+          <td><span class="pill warn">Required</span></td>
+          <td>Company-wide time/attendance</td>
+          <td><span class="pill warn">Read-only (pickers) <sup>3</sup></span></td>
+          <td><span class="pill no">Hidden</span></td>
+          <td><span class="pill no">No</span></td>
+        </tr>
+        <tr>
+          <td class="role">SALES</td>
+          <td><span class="pill warn">Required</span></td>
+          <td>Own account</td>
+          <td><span class="pill no">No access</span></td>
+          <td><span class="pill no">Hidden</span></td>
+          <td><span class="pill no">No</span></td>
+        </tr>
+        <tr>
+          <td class="role">SUPPORT</td>
+          <td><span class="pill warn">Required</span></td>
+          <td>Own account</td>
+          <td><span class="pill no">No access</span></td>
+          <td><span class="pill no">Hidden</span></td>
+          <td><span class="pill no">No</span></td>
+        </tr>
+        <tr>
+          <td class="role">USER</td>
+          <td><span class="pill warn">Required</span></td>
+          <td>Own account</td>
+          <td><span class="pill no">No access</span></td>
+          <td><span class="pill no">Hidden</span></td>
+          <td><span class="pill no">No</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span><span class="pill yes">Yes</span> allowed / global</span>
+    <span><span class="pill warn">Required / scoped</span> account-bound</span>
+    <span><span class="pill no">None / No</span> not allowed</span>
+  </div>
+
+  <h2>Notes</h2>
+  <ul class="notes">
+    <li><sup>1</sup> <strong>ADMIN</strong> is global on the account axis (no account). Server-side data scoping still keys off <em>workspace</em> (<code>WorkspaceContext.isAdmin()</code> = <code>ROLE_ADMIN &amp;&amp; workspaceId == null</code>), so an ADMIN that belongs to a workspace is workspace-scoped there — the account and workspace axes are not yet unified.</li>
+    <li><sup>2</sup> <strong>COMPANY_ADMIN</strong> sees the header account dropdown, but the Users endpoint overrides any chosen account with the caller's own — they cannot list another company's users regardless of selection.</li>
+    <li><sup>3</sup> <strong>HR_MANAGER</strong> may <code>GET /users</code> so attendance pickers can list people, but cannot create, update, delete, or toggle users. Its user listing is not yet company-scoped.</li>
+    <li>Account assignment is enforced on <strong>admin CRUD</strong> (<code>/users</code>). Invitation and self-registration paths still create users without an account.</li>
+    <li>Account filtering for non-Users entities (Contacts, Opportunities, …) is applied via a request parameter the client sends; it is not yet derived server-side for non-admins, so it is a UI scope, not a hard boundary.</li>
+  </ul>
+
+  <footer>Generated as project documentation · reflects current CRM authorization behavior.</footer>
+</div>
+</body>
+</html>
